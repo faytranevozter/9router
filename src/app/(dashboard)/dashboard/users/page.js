@@ -282,14 +282,15 @@ export default function UsersPage() {
         </Card>
       )}
 
-      {modal?.type === "createUser" && <CreateUserModal onClose={closeModal} onSaved={async () => { await refresh(); }} />}
-      {modal?.type === "editUser" && <EditUserModal user={modal.user} onClose={closeModal} onSaved={async () => { await refresh(); }} />}
-      {modal?.type === "issueToken" && <IssueTokenModal user={modal.user} onClose={closeModal} onSaved={async (uId, t) => { if (uId === me.id) await refresh(); else await loadTokens(uId); }} />}
+      {modal?.type === "createUser" && <CreateUserModal isOpen onClose={closeModal} onSaved={async () => { await refresh(); }} />}
+      {modal?.type === "editUser" && <EditUserModal isOpen user={modal.user} onClose={closeModal} onSaved={async () => { await refresh(); }} />}
+      {modal?.type === "issueToken" && <IssueTokenModal isOpen user={modal.user} onClose={closeModal} onSaved={async (uId, t) => { if (uId === me.id) await refresh(); else await loadTokens(uId); }} />}
       {modal?.type === "editToken" && (
-        <EditTokenModal user={modal.user} token={modal.token} onClose={closeModal} onSaved={async (uId) => { await loadTokens(uId); if (uId === me.id) await loadMe(); }} />
+        <EditTokenModal isOpen user={modal.user} token={modal.token} onClose={closeModal} onSaved={async (uId) => { await loadTokens(uId); if (uId === me.id) await loadMe(); }} />
       )}
       {modal?.type === "confirmUserDelete" && (
         <ConfirmModal
+          isOpen
           title="Delete user"
           message={`Delete ${modal.user.username}? All of their tokens will be revoked.`}
           confirmText="Delete"
@@ -299,6 +300,7 @@ export default function UsersPage() {
       )}
       {modal?.type === "confirmTokenDelete" && (
         <ConfirmModal
+          isOpen
           title="Revoke token"
           message="Revoke this API token? Clients using it will be rejected immediately."
           confirmText="Revoke"
@@ -359,7 +361,7 @@ function RestrictionsForm({ value, onChange }) {
   );
 }
 
-function CreateUserModal({ onClose, onSaved }) {
+function CreateUserModal({ isOpen, onClose, onSaved }) {
   const [form, setForm] = useState({ username: "", password: "", restrictions: EMPTY_RESTRICTIONS });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
@@ -384,7 +386,7 @@ function CreateUserModal({ onClose, onSaved }) {
   };
 
   return (
-    <Modal title="Add member" onClose={onClose}>
+    <Modal isOpen={isOpen} title="Add member" onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Input label="Username" required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="e.g. alice" />
         <Input label="Password" type="password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="At least 6 characters" />
@@ -399,7 +401,7 @@ function CreateUserModal({ onClose, onSaved }) {
   );
 }
 
-function EditUserModal({ user, onClose, onSaved }) {
+function EditUserModal({ isOpen, user, onClose, onSaved }) {
   const [form, setForm] = useState({
     username: user.username,
     password: "",
@@ -431,7 +433,7 @@ function EditUserModal({ user, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={`Edit ${user.username}`} onClose={onClose}>
+    <Modal isOpen={isOpen} title={`Edit ${user.username}`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Input label="Username" required value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
         <Input label="New password (leave blank to keep)" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="At least 6 characters" />
@@ -450,7 +452,7 @@ function EditUserModal({ user, onClose, onSaved }) {
   );
 }
 
-function IssueTokenModal({ user, onClose, onSaved }) {
+function IssueTokenModal({ isOpen, user, onClose, onSaved }) {
   const [form, setForm] = useState({ name: "", expiresInDays: "30" });
   const [created, setCreated] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -480,7 +482,7 @@ function IssueTokenModal({ user, onClose, onSaved }) {
 
   if (created) {
     return (
-      <Modal title="API token created" onClose={onClose}>
+      <Modal isOpen={isOpen} title="API token created" onClose={onClose}>
         <div className="flex flex-col gap-4">
           <p className="text-sm text-text-muted">Save this key now — it will not be shown again.</p>
           <div className="rounded-lg border border-border bg-sidebar p-3 font-mono text-xs text-text-main break-all">{created.key}</div>
@@ -491,7 +493,7 @@ function IssueTokenModal({ user, onClose, onSaved }) {
   }
 
   return (
-    <Modal title={`New token · ${user.username}`} onClose={onClose}>
+    <Modal isOpen={isOpen} title={`New token · ${user.username}`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. cline on laptop" />
         <Input
@@ -512,7 +514,7 @@ function IssueTokenModal({ user, onClose, onSaved }) {
   );
 }
 
-function EditTokenModal({ user, token, onClose, onSaved }) {
+function EditTokenModal({ isOpen, user, token, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: token.name || "",
     isActive: token.isActive,
@@ -543,7 +545,7 @@ function EditTokenModal({ user, token, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={`Manage token · ${user.username}`} onClose={onClose}>
+    <Modal isOpen={isOpen} title={`Manage token · ${user.username}`} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <div className="flex items-center justify-between">

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSettings, getUserAuthByUsername } from "@/lib/localDb";
+import { getSettings, getUserAuthByUsername, getAdminUser } from "@/lib/localDb";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { setDashboardAuthCookie, isCanonicalAdminPassword, syncAdminUser } from "@/lib/auth/dashboardSession";
@@ -62,7 +62,23 @@ export async function POST(request) {
     if (typeof username === "string" && username.trim()) {
       const trimmed = username.trim();
       const user = await getUserAuthByUsername(trimmed);
-      if (!user) return fail("Invalid username or password");
+      if (!user) {
+        // Fresh install: no users exist yet. The canonical dashboard password
+        // (settings.password / INITIAL_PASSWORD) bootstraps the admin account
+        // even on the first named login.
+        if (
+          trimmed.toLowerCase() === "admin" &&
+          !(await getAdminUser()) &&
+          await isCanonicalAdminPassword(password)
+        ) {
+          const admin = await syncAdminUser();
+          recordSuccess(ip);
+          const cookieStore = await cookies();
+          await setDashboardAuthCookie(cookieStore, request, { userId: admin.id, role: "admin", username: admin.username });
+          return NextResponse.json({ success: true, user: { username: admin.username, role: "admin" } }, { headers: NO_STORE_HEADERS });
+        }
+        return fail("Invalid username or password");
+      }
       if (user.isActive === false) return fail("Account is disabled");
 
       let isValid = false;
