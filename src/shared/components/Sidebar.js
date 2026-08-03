@@ -17,27 +17,34 @@ const VISIBLE_MEDIA_KINDS = ["embedding", "image", "video", "tts", "stt"];
 // Combined entry: webSearch + webFetch share one page at /dashboard/media-providers/web
 const COMBINED_WEB_ITEM = { id: "web", label: "Web Fetch & Search", icon: "travel_explore", href: "/dashboard/media-providers/web" };
 
-const navItems = [
+const dashboardItems = [
   { href: "/dashboard/endpoint", label: "Endpoint & Key", icon: "api" },
   { href: "/dashboard/users", label: "Users & Access", icon: "group" },
   { href: "/dashboard/providers", label: "Providers", icon: "dns" },
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
   { href: "/dashboard/combos", label: "Combos", icon: "layers" },
-  { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
-  { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
   { href: "/dashboard/cli-tools", label: "CLI Tools", icon: "terminal" },
 ];
 
+const usageItems = [
+  { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
+];
+
+const quotaItems = [
+  { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
+];
+
+const configItems = [
+  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
+  { href: "/dashboard/skills", label: "Skills", icon: "extension" },
+  { href: "/dashboard/profile", label: "Settings", icon: "settings" },
+];
+
 const debugItems = [
   { href: "/dashboard/console-log", label: "Console Log", icon: "terminal" },
   { href: "/dashboard/translator", label: "Translator", icon: "translate" },
-];
-
-const systemItems = [
-  { href: "/dashboard/proxy-pools", label: "Proxy Pools", icon: "lan" },
-  { href: "/dashboard/skills", label: "Skills", icon: "extension" },
 ];
 
 export default function Sidebar({ onClose }) {
@@ -70,9 +77,13 @@ export default function Sidebar({ onClose }) {
       .catch(() => {});
   }, []);
   const isMember = role === "member";
-  const visibleNavItems = isMember
-    ? navItems.filter((i) => i.href === "/dashboard/users")
-    : navItems;
+  const visibleDashboardItems = isMember
+    ? dashboardItems.filter((i) => i.href === "/dashboard/users")
+    : dashboardItems;
+  // Members get only their Dashboard (Users & Access); usage/config/system stay admin-only.
+  const visibleUsageItems = isMember ? [] : usageItems;
+  const visibleQuotaItems = isMember ? [] : quotaItems;
+  const visibleConfigItems = isMember ? [] : configItems;
 
   // Lazy check for new npm version on mount
   useEffect(() => {
@@ -172,29 +183,43 @@ export default function Sidebar({ onClose }) {
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">
-          {visibleNavItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              className={cn(
-                "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group",
-                isActive(item.href)
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-muted hover:bg-surface-2 hover:text-text-main"
-              )}
-            >
-              <span
-                className={cn(
-                  "material-symbols-outlined text-[18px]",
-                  isActive(item.href) ? "fill-1" : "group-hover:text-primary transition-colors"
-                )}
-              >
-                {item.icon}
-              </span>
-              <span className="text-[13px] font-medium">{item.label}</span>
-            </Link>
-          ))}
+          {[
+            { title: "Dashboard", items: visibleDashboardItems },
+            { title: "Usage", items: visibleUsageItems },
+            { title: "Quota", items: visibleQuotaItems },
+            { title: "Config", items: visibleConfigItems },
+          ].map(({ title, items }) =>
+            items.length === 0 ? null : (
+              <div key={title} className="pt-2 first:pt-0">
+                <p className="px-4 text-xs font-semibold text-text-muted/60 uppercase tracking-wider mb-1">
+                  {title}
+                </p>
+                {items.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    className={cn(
+                      "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group",
+                      isActive(item.href)
+                        ? "bg-primary/10 text-primary"
+                        : "text-text-muted hover:bg-surface-2 hover:text-text-main"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "material-symbols-outlined text-[18px]",
+                        isActive(item.href) ? "fill-1" : "group-hover:text-primary transition-colors"
+                      )}
+                    >
+                      {item.icon}
+                    </span>
+                    <span className="text-[13px] font-medium">{item.label}</span>
+                  </Link>
+                ))}
+              </div>
+            )
+          )}
 
           {/* System section */}
           {!isMember && (
@@ -254,30 +279,6 @@ export default function Sidebar({ onClose }) {
               </div>
             )}
 
-            {systemItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group",
-                  isActive(item.href)
-                    ? "bg-primary/10 text-primary"
-                    : "text-text-muted hover:bg-surface-2 hover:text-text-main"
-                )}
-              >
-                <span
-                  className={cn(
-                    "material-symbols-outlined text-[18px]",
-                    isActive(item.href) ? "fill-1" : "group-hover:text-primary transition-colors"
-                  )}
-                >
-                  {item.icon}
-                </span>
-                <span className="text-[13px] font-medium">{item.label}</span>
-              </Link>
-            ))}
-
             {/* Debug items (inside System section, before Settings) */}
             {debugItems.map((item) => {
               const show = item.href !== "/dashboard/translator" || enableTranslator;
@@ -336,28 +337,6 @@ export default function Sidebar({ onClose }) {
               </span>
               <span className="text-[13px] font-medium">9English</span>
             </a>
-
-            {/* Settings */}
-            <Link
-              href="/dashboard/profile"
-              onClick={onClose}
-              className={cn(
-                "flex items-center gap-3 px-3 py-1 rounded-lg transition-all group",
-                isActive("/dashboard/profile")
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-muted hover:bg-surface-2 hover:text-text-main"
-              )}
-            >
-              <span
-                className={cn(
-                  "material-symbols-outlined text-[18px]",
-                  isActive("/dashboard/profile") ? "fill-1" : "group-hover:text-primary transition-colors"
-                )}
-              >
-                settings
-              </span>
-              <span className="text-[13px] font-medium">Settings</span>
-            </Link>
           </div>
           )}
         </nav>
