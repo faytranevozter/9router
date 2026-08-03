@@ -501,6 +501,7 @@ export default function ModelSelectModal({
                 return (
                   <button
                     key={combo.id}
+                    type="button"
                     onClick={() => handleSelect({ id: combo.name, name: combo.name, value: combo.name })}
                     className={`
                       px-2 py-1 rounded-xl text-xs font-medium transition-all border hover:cursor-pointer flex items-center gap-1
@@ -550,6 +551,7 @@ export default function ModelSelectModal({
                 return (
                   <button
                     key={model.value}
+                    type="button"
                     onClick={() => handleSelect(model)}
                     title={isPlaceholder ? "Select to pre-fill, then edit model ID in the input" : undefined}
                     className={`

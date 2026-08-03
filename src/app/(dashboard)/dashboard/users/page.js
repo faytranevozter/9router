@@ -1,9 +1,32 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Card, Button, Input, Modal, ConfirmModal, Toggle, Badge } from "@/shared/components";
+import { Card, Button, Input, Modal, ConfirmModal, Toggle, Badge, ModelSelectModal } from "@/shared/components";
 
 const EMPTY_RESTRICTIONS = { models: [], providers: [], rateLimitPerMinute: null, quota: { monthlyRequests: null, monthlyTokens: null } };
+
+// Shared across all RestrictionsForm instances so the provider list is fetched once.
+let _providersCache = null;
+let _providersPromise = null;
+async function loadActiveProviders() {
+  if (_providersCache) return _providersCache;
+  if (!_providersPromise) {
+    _providersPromise = fetch("/api/providers")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        _providersCache = (d?.connections || []).filter((c) => c.isActive !== false);
+        return _providersCache;
+      })
+      .catch(() => {
+        _providersCache = [];
+        return _providersCache;
+      })
+      .finally(() => {
+        _providersPromise = null;
+      });
+  }
+  return _providersPromise;
+}
 
 function maskKey(key) {
   if (!key) return "";
@@ -421,15 +444,85 @@ function RestrictionsForm({ value, onChange }) {
   const r = { ...EMPTY_RESTRICTIONS, ...(value || {}), quota: { ...EMPTY_RESTRICTIONS.quota, ...((value || {}).quota || {}) } };
   const set = (patch) => onChange({ ...r, ...patch });
 
+  const [activeProviders, setActiveProviders] = useState([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [patternDraft, setPatternDraft] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    loadActiveProviders().then((list) => {
+      if (mounted) setActiveProviders(list || []);
+    });
+    return () => { mounted = false; };
+  }, []);
+
+  const models = Array.isArray(r.models) ? r.models : [];
+
+  const removeModel = (model) => {
+    set({ models: models.filter((m) => m !== model) });
+  };
+
+  const addModel = (model) => {
+    const normalized = String(model).trim();
+    if (!normalized) return;
+    if (models.some((m) => m.toLowerCase() === normalized.toLowerCase())) return;
+    set({ models: [...models, normalized] });
+  };
+
+  const handlePick = (model) => {
+    // Picker passes { id: bareModelId, value: "alias/model" }. Restrictions match on the
+    // bare model id (isModelAllowed), so store the id. An empty id (placeholder) falls
+    // back to the value so a custom "provider/model-id" prefix still lands in the list.
+    addModel(model?.id || model?.value || "");
+  };
+
+  const handleUnpick = (model) => {
+    const candidates = [model?.id, model?.value].filter(Boolean);
+    set({ models: models.filter((m) => !candidates.some((c) => c.toLowerCase() === m.toLowerCase())) });
+  };
+
+  const addPattern = () => {
+    const draft = patternDraft.trim();
+    if (!draft) return;
+    draft.split(",").map((s) => s.trim()).filter(Boolean).forEach(addModel);
+    setPatternDraft("");
+  };
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2">
         <label className="text-sm font-medium text-text-main">Model allow-list</label>
-        <Input
-          placeholder="e.g. gpt-4o, claude-3-5-* (comma separated, blank = all)"
-          value={(r.models || []).join(", ")}
-          onChange={(e) => set({ models: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-        />
+        {models.length === 0 ? (
+          <p className="text-xs text-text-muted">All models allowed.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {models.map((m) => (
+              <span key={m} className="inline-flex items-center gap-1 rounded-lg border border-border bg-sidebar/40 px-2 py-1 text-xs font-mono text-text-main">
+                {m}
+                <button type="button" onClick={() => removeModel(m)} className="text-text-muted hover:text-red-500" title={`Remove ${m}`}>
+                  <span className="material-symbols-outlined text-[14px]">close</span>
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="secondary" type="button" onClick={() => setPickerOpen(true)}>
+            <span className="material-symbols-outlined text-[16px] mr-1">apps</span>
+            Pick models
+          </Button>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <Input
+              className="flex-1"
+              placeholder="Add custom pattern e.g. claude-3-5-* (Enter to add)"
+              value={patternDraft}
+              onChange={(e) => setPatternDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPattern(); } }}
+            />
+            <Button size="sm" type="button" variant="ghost" onClick={addPattern}>Add</Button>
+          </div>
+        </div>
+        <p className="text-xs text-text-muted">Wildcards allowed (e.g. <span className="font-mono">claude-3-5-*</span>). Blank = all models.</p>
       </div>
       <div className="flex flex-col gap-2">
         <label className="text-sm font-medium text-text-main">Provider allow-list</label>
@@ -462,6 +555,17 @@ function RestrictionsForm({ value, onChange }) {
           onChange={(e) => set({ quota: { ...r.quota, monthlyTokens: e.target.value === "" ? null : Number(e.target.value) } })}
         />
       </div>
+
+      <ModelSelectModal
+        isOpen={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Pick allowed models"
+        activeProviders={activeProviders}
+        addedModelValues={models}
+        onSelect={handlePick}
+        onDeselect={handleUnpick}
+        closeOnSelect={false}
+      />
     </div>
   );
 }
