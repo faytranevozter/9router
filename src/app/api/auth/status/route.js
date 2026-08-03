@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getUserById } from "@/lib/localDb";
 import { isOidcConfigured } from "@/lib/auth/oidc";
 import { getDashboardAuthSession } from "@/lib/auth/dashboardSession";
 
@@ -13,7 +13,18 @@ export async function GET() {
     const authMode = settings.authMode || "password";
     const oidcName = String(session?.oidcName || "").trim();
     const oidcEmail = String(session?.oidcEmail || "").trim();
-    const displayName = oidcName || oidcEmail || (session?.oidc ? "OIDC user" : "Password user");
+
+    let role = null;
+    let username = null;
+    if (session?.userId) {
+      const user = await getUserById(session.userId);
+      if (user) {
+        role = user.role;
+        username = user.username;
+      }
+    }
+
+    const displayName = oidcName || oidcEmail || username || (session?.oidc ? "OIDC user" : "Password user");
     const loginMethod = session?.oidc ? "OIDC" : "Password";
 
     return NextResponse.json({
@@ -24,6 +35,8 @@ export async function GET() {
       hasPassword: !!settings.password,
       displayName,
       loginMethod,
+      role,
+      username,
       oidcName: oidcName || null,
       oidcEmail: oidcEmail || null,
       oidcLogin: !!session?.oidc,
@@ -37,6 +50,8 @@ export async function GET() {
       hasPassword: false,
       displayName: "Password user",
       loginMethod: "Password",
+      role: null,
+      username: null,
       oidcName: null,
       oidcEmail: null,
       oidcLogin: false,

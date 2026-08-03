@@ -32,6 +32,17 @@ export {
   getApiKeys, getApiKeyById, createApiKey, updateApiKey, deleteApiKey, validateApiKey,
 } from "./repos/apiKeysRepo.js";
 
+// Users + user tokens (multi-user access management)
+export {
+  getUsers, getUserById, getUserByUsername, getAdminUser, getUserCount,
+  createUser, updateUser, deleteUser, ensureAdminUser,
+  getUserAuthById, getUserAuthByUsername,
+} from "./repos/usersRepo.js";
+export {
+  getUserTokens, getUserTokenById, getUserTokenByKey,
+  createUserToken, updateUserToken, deleteUserToken, validateUserToken,
+} from "./repos/userTokensRepo.js";
+
 // Combos
 export {
   getCombos, getComboById, getComboByName,
@@ -78,6 +89,8 @@ export async function exportDb() {
     providerNodes: db.all(`SELECT * FROM providerNodes`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, type: r.type, name: r.name, createdAt: r.createdAt, updatedAt: r.updatedAt })),
     proxyPools: db.all(`SELECT * FROM proxyPools`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, isActive: r.isActive === 1, testStatus: r.testStatus, createdAt: r.createdAt, updatedAt: r.updatedAt })),
     apiKeys: db.all(`SELECT * FROM apiKeys`).map((r) => ({ id: r.id, key: r.key, name: r.name, machineId: r.machineId, isActive: r.isActive === 1, createdAt: r.createdAt })),
+    users: db.all(`SELECT * FROM users`).map((r) => ({ id: r.id, username: r.username, passwordHash: r.passwordHash, role: r.role, isActive: r.isActive === 1, restrictions: parseJson(r.restrictions, {}), createdAt: r.createdAt, updatedAt: r.updatedAt })),
+    userTokens: db.all(`SELECT * FROM userTokens`).map((r) => ({ id: r.id, userId: r.userId, key: r.key, name: r.name, isActive: r.isActive === 1, expiresAt: r.expiresAt, lastUsedAt: r.lastUsedAt, createdAt: r.createdAt })),
     combos: db.all(`SELECT * FROM combos`).map((r) => ({ id: r.id, name: r.name, kind: r.kind, models: parseJson(r.models, []), createdAt: r.createdAt, updatedAt: r.updatedAt })),
     modelAliases: {},
     customModels: [],
@@ -106,6 +119,8 @@ export async function importDb(payload) {
     db.run(`DELETE FROM providerNodes`);
     db.run(`DELETE FROM proxyPools`);
     db.run(`DELETE FROM apiKeys`);
+    db.run(`DELETE FROM userTokens`);
+    db.run(`DELETE FROM users`);
     db.run(`DELETE FROM combos`);
     db.run(`DELETE FROM kv WHERE scope IN ('modelAliases', 'customModels', 'mitmAlias', 'pricing')`);
 
@@ -139,6 +154,18 @@ export async function importDb(payload) {
       db.run(
         `INSERT OR REPLACE INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
         [k.id, k.key, k.name || null, k.machineId || null, k.isActive === false ? 0 : 1, k.createdAt || new Date().toISOString()]
+      );
+    }
+    for (const u of payload.users || []) {
+      db.run(
+        `INSERT OR REPLACE INTO users(id, username, passwordHash, role, isActive, restrictions, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+        [u.id, u.username, u.passwordHash || "", u.role || "member", u.isActive === false ? 0 : 1, stringifyJson(u.restrictions || {}), u.createdAt || new Date().toISOString(), u.updatedAt || new Date().toISOString()]
+      );
+    }
+    for (const t of payload.userTokens || []) {
+      db.run(
+        `INSERT OR REPLACE INTO userTokens(id, userId, key, name, isActive, expiresAt, lastUsedAt, createdAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+        [t.id, t.userId, t.key, t.name || null, t.isActive === false ? 0 : 1, t.expiresAt || null, t.lastUsedAt || null, t.createdAt || new Date().toISOString()]
       );
     }
     for (const c of payload.combos || []) {

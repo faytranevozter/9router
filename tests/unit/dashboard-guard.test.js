@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   })),
   getSettings: vi.fn(),
   validateApiKey: vi.fn(),
+  validateUserToken: vi.fn(),
   getConsistentMachineId: vi.fn(),
   verifyDashboardAuthToken: vi.fn(),
 }));
@@ -23,6 +24,7 @@ vi.mock("next/server", () => ({
 vi.mock("@/lib/localDb", () => ({
   getSettings: mocks.getSettings,
   validateApiKey: mocks.validateApiKey,
+  validateUserToken: mocks.validateUserToken,
 }));
 
 vi.mock("@/shared/utils/machineId", () => ({
@@ -50,6 +52,7 @@ describe("dashboard guard public LLM API access", () => {
     vi.clearAllMocks();
     mocks.getSettings.mockResolvedValue({ requireLogin: true });
     mocks.validateApiKey.mockResolvedValue(false);
+    mocks.validateUserToken.mockResolvedValue(false);
     mocks.getConsistentMachineId.mockResolvedValue("cli-token");
     mocks.verifyDashboardAuthToken.mockResolvedValue(false);
   });
@@ -164,6 +167,30 @@ describe("dashboard guard public LLM API access", () => {
     expect(mocks.validateApiKey).toHaveBeenCalledWith("sk-valid");
   });
 
+  it("allows remote public LLM API with valid user token", async () => {
+    mocks.validateUserToken.mockResolvedValue({ user: { id: "u1" }, token: { id: "t1" } });
+
+    const response = await proxy(request("/v1/chat/completions", {
+      host: "router.example.com",
+      authorization: "Bearer sk-user-abc123-deadbeef",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateUserToken).toHaveBeenCalledWith("sk-user-abc123-deadbeef");
+  });
+
+  it("rejects remote public LLM API with expired user token", async () => {
+    mocks.validateUserToken.mockResolvedValue(null);
+
+    const response = await proxy(request("/v1/chat/completions", {
+      host: "router.example.com",
+      authorization: "Bearer sk-user-abc123-deadbeef",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("API key required for remote API access");
+  });
+
   it("allows remote beta public LLM API with valid Google API key header", async () => {
     mocks.validateApiKey.mockResolvedValue(true);
 
@@ -193,6 +220,7 @@ describe("dashboard guard local-only access", () => {
     vi.clearAllMocks();
     mocks.getSettings.mockResolvedValue({ requireLogin: true });
     mocks.validateApiKey.mockResolvedValue(false);
+    mocks.validateUserToken.mockResolvedValue(false);
     mocks.getConsistentMachineId.mockResolvedValue("cli-token");
     mocks.verifyDashboardAuthToken.mockResolvedValue(false);
   });

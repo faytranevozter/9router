@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSettings, validateApiKey } from "@/lib/localDb";
+import { getSettings, validateApiKey, validateUserToken } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 
@@ -42,6 +42,7 @@ const ALWAYS_PROTECTED = [
   "/api/version/update",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
+  "/api/users",
 ];
 
 // Require auth, but allow through if requireLogin is disabled
@@ -130,6 +131,9 @@ function extractApiKey(request) {
 async function hasValidApiKey(request) {
   const apiKey = extractApiKey(request);
   if (!apiKey) return false;
+  if (apiKey.startsWith("sk-user-")) {
+    return !!(await validateUserToken(apiKey));
+  }
   return await validateApiKey(apiKey);
 }
 

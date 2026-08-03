@@ -10,6 +10,7 @@ import {
 import { cacheClaudeHeaders } from "open-sse/utils/claudeHeaderCache.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
+import { enforceChatAccess } from "../services/userAccess.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
@@ -88,6 +89,16 @@ export async function handleChat(request, clientRawRequest = null) {
 
   // Check if model is a combo (has multiple models with fallback)
   const comboModels = await getComboModels(modelStr);
+
+  // Enforce per-user access control (expiry, rate limit, quota, allow-lists).
+  // Only applies when a user token is presented; machine keys + localhost pass.
+  if (apiKey?.startsWith("sk-user-")) {
+    const gate = await enforceChatAccess(apiKey, modelStr, comboModels);
+    if (!gate.ok) {
+      log.warn("AUTH", gate.message);
+      return errorResponse(gate.status, gate.message);
+    }
+  }
   if (comboModels) {
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};

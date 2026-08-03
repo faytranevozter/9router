@@ -1,3 +1,8 @@
+# Unreleased
+
+## Features
+- **Multi-user access**: admin/member dashboard accounts (the existing password becomes the admin user), per-user API tokens (`sk-user-*`) with configurable expiration, expiry enforcement (401) with renewable tokens, and per-user restrictions enforced at `/v1/*`: model allow-lists, provider allow-lists, per-user rate limits, and monthly usage quotas. Existing machine-bound API keys, localhost bypass, and `/api/keys`/CLI behavior are unchanged. Managed via the new `/dashboard/users` page and `/api/users*` endpoints.
+
 # v0.5.45 (2026-07-30)
 
 ## Features

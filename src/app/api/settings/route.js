@@ -68,6 +68,11 @@ export async function PATCH(request) {
       body.password = await bcrypt.hash(body.newPassword, salt);
       delete body.newPassword;
       delete body.currentPassword;
+
+      // Keep the admin user's stored hash in sync with the canonical password.
+      import("@/lib/auth/dashboardSession")
+        .then(({ syncAdminUser }) => syncAdminUser().catch(() => {}))
+        .catch(() => {});
     }
 
     if (Object.prototype.hasOwnProperty.call(body, "oidcClientSecret")) {

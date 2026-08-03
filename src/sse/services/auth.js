@@ -318,8 +318,15 @@ export function extractApiKey(request) {
 
 /**
  * Validate API key (optional - for local use can skip)
+ * Accepts machine-bound keys AND user tokens (sk-user-...). User tokens must
+ * be active + unexpired with an active owner.
  */
 export async function isValidApiKey(apiKey) {
   if (!apiKey) return false;
+  if (apiKey.startsWith("sk-user-")) {
+    const { validateUserToken } = await import("@/lib/localDb");
+    const found = await validateUserToken(apiKey);
+    return !!found;
+  }
   return await validateApiKey(apiKey);
 }

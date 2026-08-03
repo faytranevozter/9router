@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -86,6 +86,35 @@ export const TABLES = {
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)"],
   },
+  users: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      username: "TEXT UNIQUE NOT NULL",
+      passwordHash: "TEXT NOT NULL",
+      role: "TEXT NOT NULL DEFAULT 'member'",
+      isActive: "INTEGER DEFAULT 1",
+      restrictions: "TEXT NOT NULL DEFAULT '{}'",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: ["CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)"],
+  },
+  userTokens: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      key: "TEXT UNIQUE NOT NULL",
+      name: "TEXT",
+      isActive: "INTEGER DEFAULT 1",
+      expiresAt: "TEXT",
+      lastUsedAt: "TEXT",
+      createdAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_ut_user ON userTokens(userId)",
+      "CREATE INDEX IF NOT EXISTS idx_ut_key ON userTokens(key)",
+    ],
+  },
   combos: {
     columns: {
       id: "TEXT PRIMARY KEY",
@@ -127,6 +156,7 @@ export const TABLES = {
       "CREATE INDEX IF NOT EXISTS idx_uh_provider ON usageHistory(provider)",
       "CREATE INDEX IF NOT EXISTS idx_uh_model ON usageHistory(model)",
       "CREATE INDEX IF NOT EXISTS idx_uh_conn ON usageHistory(connectionId)",
+      "CREATE INDEX IF NOT EXISTS idx_uh_apikey ON usageHistory(apiKey)",
     ],
   },
   usageDaily: {

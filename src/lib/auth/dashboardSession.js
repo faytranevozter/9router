@@ -5,6 +5,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { DATA_DIR } from "@/lib/dataDir";
 import { getSettings } from "@/lib/localDb";
+import { getAdminUser, getUserById, ensureAdminUser, updateUser } from "@/lib/db/repos/usersRepo.js";
 
 const DEFAULT_PASSWORD = "123456";
 
@@ -74,9 +75,65 @@ export function clearDashboardAuthCookie(cookieStore) {
 // Verify the current dashboard password (re-auth for sensitive actions).
 export async function verifyDashboardPassword(password) {
   if (typeof password !== "string" || !password) return false;
+  if (await isCanonicalAdminPassword(password)) return true;
+  // Fallback: an admin user's stored hash (kept in sync with canonical).
+  try {
+    const admin = await getAdminUser();
+    if (admin?.passwordHash) return bcrypt.compare(password, admin.passwordHash);
+  } catch { /* ignore */ }
+  return false;
+}
+
+/**
+ * Canonical admin password check: settings.password (bcrypt hash) takes
+ * precedence, else the INITIAL_PASSWORD / default. This mirrors the legacy
+ * single-password login so existing installs keep working unchanged.
+ */
+export async function isCanonicalAdminPassword(password) {
+  if (typeof password !== "string" || !password) return false;
   const settings = await getSettings();
   const storedHash = settings?.password;
   if (storedHash) return bcrypt.compare(password, storedHash);
   const initialPassword = process.env.INITIAL_PASSWORD || DEFAULT_PASSWORD;
   return password === initialPassword;
+}
+
+/**
+ * Ensure an admin user exists and its stored hash matches the canonical
+ * dashboard password. Used by login to bootstrap/keep the admin in sync.
+ * @returns {Promise<object>} admin user row
+ */
+export async function syncAdminUser() {
+  const settings = await getSettings();
+  const canonicalHash = settings?.password || await bcrypt.hash(process.env.INITIAL_PASSWORD || DEFAULT_PASSWORD, 10);
+  const admin = await ensureAdminUser(canonicalHash, "admin");
+  if (admin.passwordHash !== canonicalHash) {
+    await updateUser(admin.id, { passwordHash: canonicalHash });
+    return { ...admin, passwordHash: canonicalHash };
+  }
+  return admin;
+}
+
+/**
+ * Load the currently authenticated dashboard user from the request cookie.
+ * @param {import("next/headers").ReadonlyRequestCookies} [cookieStore] - the
+ *   request cookie store; when omitted, reads from the request context.
+ * @returns {Promise<object|null>} user row or null (no/invalid session,
+ *   unknown user, or deactivated user)
+ */
+export async function getCurrentUser(cookieStore = null) {
+  let token;
+  if (cookieStore) {
+    token = cookieStore.get?.("auth_token")?.value;
+  } else {
+    try {
+      const { cookies } = await import("next/headers");
+      token = (await cookies()).get("auth_token")?.value;
+    } catch { return null; }
+  }
+  const session = await getDashboardAuthSession(token);
+  if (!session?.userId) return null;
+  const user = await getUserById(session.userId);
+  if (!user || user.isActive === false) return null;
+  return user;
 }
