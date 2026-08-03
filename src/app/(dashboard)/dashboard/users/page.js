@@ -681,36 +681,44 @@ function ChangePasswordModal({ isOpen, user, onClose, onSaved }) {
   const [err, setErr] = useState("");
   const [success, setSuccess] = useState(false);
 
-  const submit = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setErr("");
-    setSuccess(false);
-    if (form.newPassword !== form.confirmPassword) {
-      setErr("New passwords do not match");
-      setSaving(false);
-      return;
-    }
-    if (form.newPassword.length < 6) {
-      setErr("New password must be at least 6 characters");
-      setSaving(false);
-      return;
-    }
-    const res = await fetch("/api/users/me/password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setErr(data.error || "Failed to change password");
-      setSaving(false);
-      return;
-    }
-    setSuccess(true);
-    setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-    await onSaved();
-  };
+   const submit = async (e) => {
+     e.preventDefault();
+     setSaving(true);
+     setErr("");
+     setSuccess(false);
+     if (form.newPassword !== form.confirmPassword) {
+       setErr("New passwords do not match");
+       setSaving(false);
+       return;
+     }
+     if (form.newPassword.length < 6) {
+       setErr("New password must be at least 6 characters");
+       setSaving(false);
+       return;
+     }
+     const res = await fetch("/api/users/me/password", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }),
+     });
+     let data;
+     try {
+       data = await res.json();
+     } catch {
+       const text = await res.text();
+       setErr(`Failed to change password: ${text || res.statusText}`);
+       setSaving(false);
+       return;
+     }
+     if (!res.ok) {
+       setErr(data.error || "Failed to change password");
+       setSaving(false);
+       return;
+     }
+     setSuccess(true);
+     setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+     await onSaved();
+   };
 
   return (
     <Modal isOpen={isOpen} title={`Change password · ${user.username}`} onClose={onClose}>

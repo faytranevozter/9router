@@ -4,10 +4,9 @@ import { getUserById, getUserTokenById, updateUserToken, deleteUserToken } from 
 
 export const dynamic = "force-dynamic";
 
-function canManageToken(user, targetUserId, tokenUserId) {
-  if (user.role === "admin") return true;
-  if (user.id === targetUserId && user.id === tokenUserId) return true;
-  return false;
+function canManageToken(user, targetUserId) {
+  // Admins can manage any token; members can only manage their own
+  return user.role === "admin" || user.id === targetUserId;
 }
 
 // PUT /api/users/[id]/tokens/[tokenId] — extend / rename / toggle a user's token (admin or self)
@@ -22,7 +21,7 @@ export async function PUT(request, { params }) {
     if (!token || token.userId !== id) {
       return NextResponse.json({ error: "Token not found" }, { status: 404 });
     }
-    if (!canManageToken(user, id, token.userId)) {
+    if (!canManageToken(user, id)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const body = await request.json();
