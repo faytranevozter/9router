@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "../_shared";
+import { requireUser } from "../../_shared";
 import { getUserTokens } from "@/lib/localDb";
 import { getUserUsage } from "@/lib/usageDb.js";
 

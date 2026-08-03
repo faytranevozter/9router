@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "../_shared";
+import { requireUser } from "../../_shared";
 import { buildModelsList } from "@/app/api/v1/models/route.js";
 import { filterModelsForUser } from "@/sse/services/userAccess.js";
 
