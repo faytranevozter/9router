@@ -73,6 +73,27 @@ export function isProviderAllowed(restrictions, providerId) {
 }
 
 /**
+ * Filter an OpenAI-style models list down to what a user is allowed to use,
+ * based on their model + provider allow-lists. Combos and model entries whose
+ * provider or id is not allowed are dropped. Unrestricted users get everything.
+ * @param {Array<{id: string, owned_by?: string}>} models
+ * @param {object} restrictions
+ * @returns {Array} allowed models
+ */
+export function filterModelsForUser(models, restrictions = {}) {
+  const list = Array.isArray(models) ? models : [];
+  if (!restrictions.models?.length && !restrictions.providers?.length) return list;
+  return list.filter((m) => {
+    const fullId = m.id || "";
+    const slash = fullId.lastIndexOf("/");
+    const bare = slash >= 0 ? fullId.slice(slash + 1) : fullId;
+    const provider = m.owned_by ? resolveProviderId(m.owned_by) : null;
+    if (!isProviderAllowed(restrictions, provider)) return false;
+    return isModelAllowed(restrictions, fullId) || isModelAllowed(restrictions, bare);
+  });
+}
+
+/**
  * Check model + provider allow-lists for a request. Combo requests check every
  * member model so a combo can't silently route around restrictions.
  * @param {object} user

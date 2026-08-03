@@ -77,6 +77,12 @@ export default function UsersPage() {
   const [error, setError] = useState("");
   const [modal, setModal] = useState(null); // {type, user, token}
 
+  // Member-scoped views
+  const [myModels, setMyModels] = useState([]);
+  const [myModelsScoped, setMyModelsScoped] = useState(false);
+  const [myUsage, setMyUsage] = useState(null);
+  const [usagePeriod, setUsagePeriod] = useState("30d");
+
   const loadMe = useCallback(async () => {
     const res = await fetch("/api/users/me");
     if (res.ok) {
@@ -109,6 +115,24 @@ export default function UsersPage() {
     }
   }, []);
 
+  const loadMyModels = useCallback(async () => {
+    const res = await fetch("/api/users/me/models");
+    if (res.ok) {
+      const d = await res.json();
+      setMyModels(d.models || []);
+      setMyModelsScoped(!!d.scoped);
+    }
+  }, []);
+
+  const loadMyUsage = useCallback(async (period) => {
+    const p = period || "30d";
+    const res = await fetch(`/api/users/me/usage?period=${p}`);
+    if (res.ok) {
+      const d = await res.json();
+      setMyUsage(d.usage);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       await loadMe();
@@ -129,10 +153,22 @@ export default function UsersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, me]);
 
+  useEffect(() => {
+    (async () => {
+      if (me?.role === "member") {
+        await Promise.all([loadMyModels(), loadMyUsage(usagePeriod)]);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, usagePeriod]);
+
   const refresh = async () => {
     await loadMe();
     if (me?.role === "admin") await loadUsers();
     if (expanded) await loadTokens(expanded);
+    if (me?.role === "member") {
+      await Promise.all([loadMyModels(), loadMyUsage(usagePeriod)]);
+    }
   };
 
   const openUser = async (userId) => {
@@ -204,7 +240,10 @@ export default function UsersPage() {
                 <p className="font-semibold text-text-main">My account</p>
                 <p className="text-xs text-text-muted">Username: <span className="font-mono">{me.username}</span></p>
               </div>
-              <Badge variant={me.isActive ? "success" : "error"}>{me.isActive ? "active" : "disabled"}</Badge>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setModal({ type: "changePassword", user: me })}>Change password</Button>
+                <Badge variant={me.isActive ? "success" : "error"}>{me.isActive ? "active" : "disabled"}</Badge>
+              </div>
             </div>
             <div className="mt-4">
               <RestrictionsView restrictions={me.restrictions} />
@@ -227,6 +266,64 @@ export default function UsersPage() {
                 />
               ))}
             </div>
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-text-main">Models available to me</h2>
+              {myModelsScoped && <Badge variant="primary">scoped by admin</Badge>}
+            </div>
+            <div className="max-h-72 overflow-y-auto custom-scrollbar flex flex-col gap-1">
+              {myModels.length === 0 && <p className="text-sm text-text-muted">No models available. Contact your administrator.</p>}
+              {myModels.map((m) => (
+                <div key={m.id} className="rounded border border-border bg-sidebar/40 px-3 py-1.5 text-xs font-mono text-text-main">
+                  {m.id}
+                  {m.name ? <span className="text-text-muted font-sans"> · {m.name}</span> : null}
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-text-main">My usage</h2>
+              <div className="flex items-center gap-1">
+                {["24h", "7d", "30d", "all"].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setUsagePeriod(p)}
+                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                      usagePeriod === p ? "bg-primary/10 text-primary" : "text-text-muted hover:bg-surface-2"
+                    }`}
+                  >
+                    {p === "all" ? "All" : p}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {myUsage ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-border bg-sidebar/40 p-3">
+                  <p className="text-xs text-text-muted">Requests</p>
+                  <p className="text-xl font-bold text-text-main">{myUsage.totalRequests}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-sidebar/40 p-3">
+                  <p className="text-xs text-text-muted">Prompt tokens</p>
+                  <p className="text-xl font-bold text-text-main">{myUsage.totalPromptTokens}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-sidebar/40 p-3">
+                  <p className="text-xs text-text-muted">Completion tokens</p>
+                  <p className="text-xl font-bold text-text-main">{myUsage.totalCompletionTokens}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-sidebar/40 p-3">
+                  <p className="text-xs text-text-muted">Cost</p>
+                  <p className="text-xl font-bold text-text-main">${(myUsage.totalCost || 0).toFixed(4)}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-text-muted">Loading usage…</p>
+            )}
           </Card>
         </>
       )}
@@ -282,6 +379,14 @@ export default function UsersPage() {
         </Card>
       )}
 
+      {modal?.type === "changePassword" && (
+        <ChangePasswordModal
+          isOpen
+          user={modal.user}
+          onClose={closeModal}
+          onSaved={async () => { await loadMe(); closeModal(); }}
+        />
+      )}
       {modal?.type === "createUser" && <CreateUserModal isOpen onClose={closeModal} onSaved={async () => { await refresh(); }} />}
       {modal?.type === "editUser" && <EditUserModal isOpen user={modal.user} onClose={closeModal} onSaved={async () => { await refresh(); }} />}
       {modal?.type === "issueToken" && <IssueTokenModal isOpen user={modal.user} onClose={closeModal} onSaved={async (uId, t) => { if (uId === me.id) await refresh(); else await loadTokens(uId); }} />}
@@ -564,6 +669,79 @@ function EditTokenModal({ isOpen, user, token, onClose, onSaved }) {
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" loading={saving}>Save</Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function ChangePasswordModal({ isOpen, user, onClose, onSaved }) {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr("");
+    setSuccess(false);
+    if (form.newPassword !== form.confirmPassword) {
+      setErr("New passwords do not match");
+      setSaving(false);
+      return;
+    }
+    if (form.newPassword.length < 6) {
+      setErr("New password must be at least 6 characters");
+      setSaving(false);
+      return;
+    }
+    const res = await fetch("/api/users/me/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: form.currentPassword, newPassword: form.newPassword }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setErr(data.error || "Failed to change password");
+      setSaving(false);
+      return;
+    }
+    setSuccess(true);
+    setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    await onSaved();
+  };
+
+  return (
+    <Modal isOpen={isOpen} title={`Change password · ${user.username}`} onClose={onClose}>
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Input
+          label="Current password"
+          type="password"
+          value={form.currentPassword}
+          onChange={(e) => setForm({ ...form, currentPassword: e.target.value })}
+          required
+        />
+        <Input
+          label="New password"
+          type="password"
+          value={form.newPassword}
+          onChange={(e) => setForm({ ...form, newPassword: e.target.value })}
+          required
+          placeholder="At least 6 characters"
+        />
+        <Input
+          label="Confirm new password"
+          type="password"
+          value={form.confirmPassword}
+          onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+          required
+        />
+        {err && <p className="text-xs text-red-500">{err}</p>}
+        {success && <p className="text-xs text-green-500">Password changed successfully.</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={saving}>Change password</Button>
         </div>
       </form>
     </Modal>

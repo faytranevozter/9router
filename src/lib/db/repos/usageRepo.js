@@ -333,6 +333,70 @@ export async function getUsageHistory(filter = {}) {
   }));
 }
 
+/**
+ * Member-scoped usage: aggregate usageHistory rows attributed to the given
+ * API-token keys (a member's tokens). Only rows carrying one of these keys are
+ * counted, so the summary reflects exactly that user's activity.
+ * @param {string[]} tokenKeys
+ * @param {string} period - "24h" | "7d" | "30d" | "60d" | "all"
+ */
+export async function getUserUsage(tokenKeys, period = "30d") {
+  const db = await getAdapter();
+  const keys = Array.isArray(tokenKeys) ? tokenKeys.filter(Boolean) : [];
+  const stats = {
+    totalRequests: 0,
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
+    totalCost: 0,
+    byProvider: {},
+    byModel: {},
+    recentRequests: [],
+  };
+  if (keys.length === 0) return stats;
+
+  const since = period === "all" ? null : new Date(Date.now() - (PERIOD_MS[period] || PERIOD_MS["30d"])).toISOString();
+  const marks = keys.map(() => "?").join(",");
+  const params = [...keys];
+  let where = `apiKey IN (${marks})`;
+  if (since) {
+    where += " AND timestamp >= ?";
+    params.push(since);
+  }
+
+  const rows = db.all(
+    `SELECT provider, model, promptTokens, completionTokens, cost FROM usageHistory WHERE ${where}`,
+    params
+  );
+  for (const r of rows) {
+    const pt = r.promptTokens || 0;
+    const ct = r.completionTokens || 0;
+    stats.totalRequests += 1;
+    stats.totalPromptTokens += pt;
+    stats.totalCompletionTokens += ct;
+    stats.totalCost += r.cost || 0;
+    const provider = r.provider || "unknown";
+    const model = r.model || "unknown";
+    addToCounter(stats.byProvider, provider, { requests: 1, promptTokens: pt, completionTokens: ct, cost: r.cost || 0 });
+    addToCounter(stats.byModel, model, { requests: 1, promptTokens: pt, completionTokens: ct, cost: r.cost || 0 });
+  }
+
+  const recent = db.all(
+    `SELECT timestamp, provider, model, tokens, status FROM usageHistory WHERE ${where} ORDER BY id DESC LIMIT 10`,
+    params
+  );
+  stats.recentRequests = recent.map((r) => {
+    const t = parseJson(r.tokens, {}) || {};
+    return {
+      timestamp: r.timestamp, model: r.model, provider: r.provider || "",
+      promptTokens: t.prompt_tokens || t.input_tokens || 0,
+      completionTokens: t.completion_tokens || t.output_tokens || 0,
+      status: r.status || "ok",
+    };
+  });
+
+  return stats;
+}
+
 function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
     return adapter.all(`SELECT dateKey, data FROM usageDaily`);

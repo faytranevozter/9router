@@ -533,15 +533,38 @@ export async function OPTIONS() {
   });
 }
 
+function extractModelsApiKey(request) {
+  const auth = request?.headers?.get("Authorization");
+  if (auth?.startsWith("Bearer ")) return auth.slice(7);
+  const x = request?.headers?.get("x-api-key");
+  if (x) return x;
+  const g = request?.headers?.get("x-goog-api-key");
+  if (g) return g;
+  return request?.nextUrl?.searchParams?.get("key") || null;
+}
+
 /**
  * GET /v1/models - OpenAI compatible models list (LLM/chat models only by default).
  * For other capabilities use /v1/models/{kind} (image, tts, stt, embedding, image-to-text, web).
+ * When a valid user token (sk-user-*) is presented, the list is scoped to that
+ * user's admin-set model/provider allow-lists.
  */
 export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
+    let data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
+
+    const userKey = extractModelsApiKey(request);
+    if (userKey?.startsWith("sk-user-")) {
+      const { validateUserToken } = await import("@/lib/localDb");
+      const found = await validateUserToken(userKey);
+      if (found) {
+        const { filterModelsForUser } = await import("@/sse/services/userAccess.js");
+        data = filterModelsForUser(data, found.user.restrictions || {});
+      }
+    }
+
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

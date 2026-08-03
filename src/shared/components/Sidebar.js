@@ -61,6 +61,19 @@ export default function Sidebar({ onClose }) {
       .catch(() => {});
   }, []);
 
+  // Members get a scoped sidebar (their tokens/models/usage only).
+  const [role, setRole] = useState(null);
+  useEffect(() => {
+    fetch("/api/auth/status")
+      .then(res => res.json())
+      .then(data => { if (data.role) setRole(data.role); })
+      .catch(() => {});
+  }, []);
+  const isMember = role === "member";
+  const visibleNavItems = isMember
+    ? navItems.filter((i) => i.href === "/dashboard/users")
+    : navItems;
+
   // Lazy check for new npm version on mount
   useEffect(() => {
     fetch("/api/version")
@@ -159,7 +172,7 @@ export default function Sidebar({ onClose }) {
 
         {/* Navigation */}
         <nav className="flex-1 px-4 py-2 space-y-0.5 overflow-y-auto custom-scrollbar">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -184,6 +197,7 @@ export default function Sidebar({ onClose }) {
           ))}
 
           {/* System section */}
+          {!isMember && (
           <div className="pt-3 mt-2 space-y-0.5">
             <p className="px-4 text-xs font-semibold text-text-muted/60 uppercase tracking-wider mb-2">
               System
@@ -345,6 +359,7 @@ export default function Sidebar({ onClose }) {
               <span className="text-[13px] font-medium">Settings</span>
             </Link>
           </div>
+          )}
         </nav>
 
       </aside>

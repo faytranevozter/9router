@@ -1,20 +1,29 @@
 import { NextResponse } from "next/server";
-import { adminOnly, resolveTokenExpiry } from "../../../_shared";
+import { adminOnly, requireUser, resolveTokenExpiry } from "../../../_shared";
 import { getUserById, getUserTokenById, updateUserToken, deleteUserToken } from "@/lib/localDb";
 
 export const dynamic = "force-dynamic";
 
-// PUT /api/users/[id]/tokens/[tokenId] — extend / rename / toggle a user's token (admin only)
+function canManageToken(user, targetUserId, tokenUserId) {
+  if (user.role === "admin") return true;
+  if (user.id === targetUserId && user.id === tokenUserId) return true;
+  return false;
+}
+
+// PUT /api/users/[id]/tokens/[tokenId] — extend / rename / toggle a user's token (admin or self)
 export async function PUT(request, { params }) {
-  const { error } = await adminOnly(request);
-  if (error) return error;
+  const { user, error: authError } = await requireUser(request);
+  if (authError) return authError;
   try {
     const { id, tokenId } = await params;
-    const user = await getUserById(id);
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const target = await getUserById(id);
+    if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const token = await getUserTokenById(tokenId);
     if (!token || token.userId !== id) {
       return NextResponse.json({ error: "Token not found" }, { status: 404 });
+    }
+    if (!canManageToken(user, id, token.userId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const body = await request.json();
     const data = {};
@@ -32,17 +41,20 @@ export async function PUT(request, { params }) {
   }
 }
 
-// DELETE /api/users/[id]/tokens/[tokenId] — revoke a user's token (admin only)
+// DELETE /api/users/[id]/tokens/[tokenId] — revoke a user's token (admin or self)
 export async function DELETE(request, { params }) {
-  const { error } = await adminOnly(request);
-  if (error) return error;
+  const { user, error: authError } = await requireUser(request);
+  if (authError) return authError;
   try {
     const { id, tokenId } = await params;
-    const user = await getUserById(id);
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    const target = await getUserById(id);
+    if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const token = await getUserTokenById(tokenId);
     if (!token || token.userId !== id) {
       return NextResponse.json({ error: "Token not found" }, { status: 404 });
+    }
+    if (!canManageToken(user, id, token.userId)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     await deleteUserToken(token.id);
     return NextResponse.json({ message: "Token deleted" });

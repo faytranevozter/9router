@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminOnly, resolveTokenExpiry } from "../../_shared";
+import { adminOnly, requireUser, resolveTokenExpiry } from "../../_shared";
 import { getUserById, getUserTokens, createUserToken } from "@/lib/localDb";
 
 export const dynamic = "force-dynamic";
@@ -19,14 +19,17 @@ export async function GET(request, { params }) {
   }
 }
 
-// POST /api/users/[id]/tokens — issue a token for a user (admin only)
+// POST /api/users/[id]/tokens — issue a token for a user (admin only, or self for members)
 export async function POST(request, { params }) {
-  const { error } = await adminOnly(request);
-  if (error) return error;
+  const { user, error: authError } = await requireUser(request);
+  if (authError) return authError;
   try {
     const { id } = await params;
-    const user = await getUserById(id);
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (user.role !== "admin" && user.id !== id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const target = await getUserById(id);
+    if (!target) return NextResponse.json({ error: "User not found" }, { status: 404 });
     const body = await request.json();
     const name = typeof body.name === "string" ? body.name.trim().slice(0, 100) : "";
     const { expiresAt, error: expiryError } = resolveTokenExpiry(body);

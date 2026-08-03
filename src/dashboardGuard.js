@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getSettings, validateApiKey, validateUserToken } from "@/lib/localDb";
+import { getSettings, validateApiKey, validateUserToken, getUserById } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { verifyDashboardAuthToken, getDashboardAuthSession } from "@/lib/auth/dashboardSession";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -155,6 +155,27 @@ async function hasValidToken(request) {
   return await verifyDashboardAuthToken(token);
 }
 
+// Member accounts are scoped to their own tokens/models/usage only. Dashboard
+// pages and API routes outside these prefixes are blocked for them.
+const MEMBER_DASHBOARD_PREFIXES = ["/dashboard/users"];
+const MEMBER_API_PREFIXES = ["/api/users/me", "/api/auth/"];
+
+async function getSessionUser(request) {
+  const token = request.cookies.get("auth_token")?.value;
+  const session = await getDashboardAuthSession(token);
+  if (!session?.userId) return null;
+  try {
+    return await getUserById(session.userId);
+  } catch {
+    return null;
+  }
+}
+
+async function isMemberSession(request) {
+  const user = await getSessionUser(request);
+  return user?.role === "member" ? user : null;
+}
+
 // Read settings directly from DB to avoid self-fetch deadlock in proxy
 async function loadSettings() {
   try {
@@ -209,8 +230,14 @@ export async function proxy(request) {
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
     if (isPublicApi(pathname)) return NextResponse.next();
-    if (await hasValidCliToken(request) || await isAuthenticated(request))
+    if (await hasValidCliToken(request) || await isAuthenticated(request)) {
+      // Members may only reach their own token/models/usage endpoints.
+      const member = await isMemberSession(request);
+      if (member && !MEMBER_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
       return NextResponse.next();
+    }
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -246,6 +273,11 @@ export async function proxy(request) {
     const token = request.cookies.get("auth_token")?.value;
     if (token) {
       if (await verifyDashboardAuthToken(token)) {
+        // Members are restricted to their own keys/models/usage page.
+        const member = await isMemberSession(request);
+        if (member && !MEMBER_DASHBOARD_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))) {
+          return NextResponse.redirect(new URL("/dashboard/users", request.url));
+        }
         return NextResponse.next();
       } else {
         return NextResponse.redirect(new URL("/login", request.url));
