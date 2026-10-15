@@ -24,8 +24,15 @@ export default function APIPageClient({ machineId }) {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyTokenLimit, setNewKeyTokenLimit] = useState("");
   const [createdKey, setCreatedKey] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
+
+  // Edit Key (token quota) modal state.
+  const [editingKey, setEditingKey] = useState(null);
+  const [editKeyTokenLimit, setEditKeyTokenLimit] = useState("");
+  const [editKeyUsedTokens, setEditKeyUsedTokens] = useState(0);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const [requireApiKey, setRequireApiKey] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
@@ -615,14 +622,22 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
+  const formatTokens = (n) => {
+    const num = Number(n) || 0;
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
+    return String(num);
+  };
+
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
 
     try {
+      const tokenLimit = newKeyTokenLimit ? Math.max(0, parseInt(newKeyTokenLimit, 10) || 0) : 0;
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName }),
+        body: JSON.stringify({ name: newKeyName.trim(), tokenLimit }),
       });
       const data = await res.json();
 
@@ -630,11 +645,53 @@ export default function APIPageClient({ machineId }) {
         setCreatedKey(data.key);
         await fetchData();
         setNewKeyName("");
+        setNewKeyTokenLimit("");
         setShowAddModal(false);
       }
     } catch (error) {
       console.log("Error creating key:", error);
     }
+  };
+
+  const handleOpenEditModal = (key) => {
+    setEditingKey(key);
+    setEditKeyTokenLimit(key.tokenLimit ? String(key.tokenLimit) : "");
+    setEditKeyUsedTokens(key.usedTokens || 0);
+  };
+
+  const handleUpdateKeyTokens = async () => {
+    if (!editingKey) return;
+    setSavingEdit(true);
+    try {
+      const tokenLimit = editKeyTokenLimit ? Math.max(0, parseInt(editKeyTokenLimit, 10) || 0) : 0;
+      const res = await fetch(`/api/keys/${editingKey.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tokenLimit, usedTokens: editKeyUsedTokens }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.key) {
+          setKeys(prev => prev.map(k => k.id === editingKey.id ? { ...k, ...data.key } : k));
+        }
+        setEditingKey(null);
+      }
+    } catch (error) {
+      console.log("Error updating key tokens:", error);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleResetKeyTokens = () => {
+    setConfirmState({
+      title: "Reset Token Usage",
+      message: `Reset used tokens counter for "${editingKey?.name}" to 0?`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        setEditKeyUsedTokens(0);
+      }
+    });
   };
 
   const handleDeleteKey = async (id) => {
@@ -1056,6 +1113,41 @@ export default function APIPageClient({ machineId }) {
                   {key.isActive === false && (
                     <p className="text-xs text-orange-500 mt-1">Paused</p>
                   )}
+
+                  {/* Token quota usage */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-text-muted">
+                    <div className="flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[13px] text-text-muted">toll</span>
+                      <span>
+                        Tokens: <strong className="text-text-main font-medium">{formatTokens(key.usedTokens || 0)}</strong>
+                        {key.tokenLimit > 0 ? (
+                          <> / {formatTokens(key.tokenLimit)} ({Math.min(100, Math.round(((key.usedTokens || 0) / key.tokenLimit) * 100))}%)</>
+                        ) : (
+                          <span className="text-text-muted font-normal"> (Unlimited)</span>
+                        )}
+                      </span>
+                    </div>
+                    {key.tokenLimit > 0 && (key.usedTokens || 0) >= key.tokenLimit && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 font-medium">
+                        Quota Exceeded
+                      </span>
+                    )}
+                  </div>
+                  {key.tokenLimit > 0 && (
+                    <div className="w-full max-w-xs mt-1.5 h-1.5 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          (key.usedTokens || 0) >= key.tokenLimit
+                            ? "bg-red-500"
+                            : ((key.usedTokens || 0) / key.tokenLimit) > 0.8
+                            ? "bg-amber-500"
+                            : "bg-primary"
+                        }`}
+                        style={{ width: `${Math.min(100, Math.round(((key.usedTokens || 0) / key.tokenLimit) * 100))}%` }}
+                      />
+                    </div>
+                  )}
+
                   <KeyAccessControls
                     apiKey={key}
                     onChange={(access) => handleUpdateKeyAccess(key.id, access)}
@@ -1069,7 +1161,14 @@ export default function APIPageClient({ machineId }) {
                     })}
                   />
                 </div>
-                <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                  <button
+                    onClick={() => handleOpenEditModal(key)}
+                    className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
+                    title="Edit token quota"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">edit</span>
+                  </button>
                   <Toggle
                     size="sm"
                     checked={key.isActive ?? true}
@@ -1109,6 +1208,7 @@ export default function APIPageClient({ machineId }) {
         onClose={() => {
           setShowAddModal(false);
           setNewKeyName("");
+          setNewKeyTokenLimit("");
         }}
       >
         <div className="flex flex-col gap-4">
@@ -1118,6 +1218,19 @@ export default function APIPageClient({ machineId }) {
             onChange={(e) => setNewKeyName(e.target.value)}
             placeholder="Production Key"
           />
+          <div>
+            <label className="text-xs text-text-muted mb-1 block font-medium">Token Limit (Quota)</label>
+            <Input
+              type="number"
+              value={newKeyTokenLimit}
+              onChange={(e) => setNewKeyTokenLimit(e.target.value)}
+              placeholder="Leave empty or 0 for unlimited tokens"
+              min="0"
+            />
+            <p className="text-[11px] text-text-muted mt-1">
+              Maximum total tokens this key can consume. Once reached, requests will return 429.
+            </p>
+          </div>
           <div className="flex gap-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
@@ -1126,9 +1239,62 @@ export default function APIPageClient({ machineId }) {
               onClick={() => {
                 setShowAddModal(false);
                 setNewKeyName("");
+                setNewKeyTokenLimit("");
               }}
               variant="ghost"
               fullWidth
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Key (token quota) Modal */}
+      <Modal
+        isOpen={!!editingKey}
+        title={`Edit API Key: ${editingKey?.name || ""}`}
+        onClose={() => !savingEdit && setEditingKey(null)}
+      >
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-text-muted block font-medium">Token Limit (Quota)</label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-text-muted">
+                  Used: <strong className="text-text-main font-semibold">{editKeyUsedTokens.toLocaleString()}</strong> tokens
+                </span>
+                {editKeyUsedTokens > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetKeyTokens}
+                    className="text-[11px] text-primary hover:underline font-medium cursor-pointer"
+                  >
+                    Reset Usage
+                  </button>
+                )}
+              </div>
+            </div>
+            <Input
+              type="number"
+              value={editKeyTokenLimit}
+              onChange={(e) => setEditKeyTokenLimit(e.target.value)}
+              placeholder="0 or empty for unlimited"
+              min="0"
+            />
+            <p className="text-[11px] text-text-muted mt-1">
+              Maximum total tokens this key can consume. Once reached, requests will return 429.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleUpdateKeyTokens} fullWidth disabled={savingEdit}>
+              {savingEdit ? "Saving..." : "Save Changes"}
+            </Button>
+            <Button
+              onClick={() => setEditingKey(null)}
+              variant="ghost"
+              fullWidth
+              disabled={savingEdit}
             >
               Cancel
             </Button>
