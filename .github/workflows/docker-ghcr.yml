@@ -1,0 +1,213 @@
+name: Docker build & push (GHCR)
+
+# Builds the container image and publishes it to GitHub Container Registry.
+#
+# Release images (vX.Y.Z + latest) are owned by docker-publish.yml; this
+# workflow publishes per-commit tags so any build is pullable:
+#   push to master        -> master, sha-<short>, edge
+#   pull_request to master -> build only (no push)
+#   manual dispatch        -> tags for whichever branch you pick
+#
+# No secrets are required: GHCR auth uses the built-in GITHUB_TOKEN.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# One run per ref; a newer push supersedes an in-flight build of the same ref.
+concurrency:
+  group: docker-ghcr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            suffix: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            suffix: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Read app version
+        id: appver
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # On push/dispatch the image is pushed by digest (no tag yet); the publish
+      # job below assembles the multi-arch manifest from those digests. On a PR
+      # it is built to cache only, so nothing is written to the registry.
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: ${{ github.event_name != 'pull_request' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.GHCR_IMAGE) || 'type=cacheonly' }}
+          build-args: |
+            APP_VERSION=${{ steps.appver.outputs.version }}
+            ALPINE_MIRROR=${{ vars.ALPINE_MIRROR || 'dl-cdn.alpinelinux.org' }}
+            NPM_REGISTRY=${{ vars.NPM_REGISTRY || 'https://registry.npmjs.org/' }}
+          labels: |
+            org.opencontainers.image.title=9router
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.appver.outputs.version }}
+          cache-from: type=gha,scope=9router-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=9router-${{ matrix.suffix }},ignore-error=true
+          provenance: false
+          sbom: false
+
+      - name: Save image digest
+        if: github.event_name != 'pull_request'
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p "$RUNNER_TEMP/digests"
+          printf '%s\n' "$IMAGE_DIGEST" > "$RUNNER_TEMP/digests/${{ matrix.suffix }}.txt"
+
+      - name: Upload image digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.suffix }}
+          path: ${{ runner.temp }}/digests/${{ matrix.suffix }}.txt
+          if-no-files-found: error
+
+  publish:
+    name: Publish manifest
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Download platform digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and verify manifest
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          digest_files=("$RUNNER_TEMP"/digests/*.txt)
+
+          if [[ "${#digest_files[@]}" -ne 2 ]]; then
+            echo "Expected two platform digests, found ${#digest_files[@]}" >&2
+            exit 1
+          fi
+
+          sources=()
+          for digest_file in "${digest_files[@]}"; do
+            digest="$(tr -d '\n' < "$digest_file")"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid image digest in $digest_file: $digest" >&2
+              exit 1
+            fi
+            sources+=("${GHCR_IMAGE}@${digest}")
+          done
+
+          # Branch names may contain "/", which is not a legal Docker tag.
+          ref_tag="${GITHUB_REF_NAME//\//-}"
+          short_sha="${GITHUB_SHA::7}"
+
+          tags=(-t "${GHCR_IMAGE}:${ref_tag}" -t "${GHCR_IMAGE}:sha-${short_sha}")
+          if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+            tags+=(-t "${GHCR_IMAGE}:edge")
+          fi
+
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "${GHCR_IMAGE}:${ref_tag}" | tee "$RUNNER_TEMP/manifest.txt"
+
+          {
+            echo "### Published image"
+            echo "- \`${GHCR_IMAGE}:${ref_tag}\`"
+            echo "- \`${GHCR_IMAGE}:sha-${short_sha}\`"
+            if [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]]; then
+              echo "- \`${GHCR_IMAGE}:edge\` (default branch)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke-test the published image
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -Eeuo pipefail
+          ref_tag="${GITHUB_REF_NAME//\//-}"
+          container="9router-smoke-${GITHUB_RUN_ID}"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+
+          docker run --detach \
+            --name "$container" \
+            --platform linux/amd64 \
+            --publish 20128:20128 \
+            "${GHCR_IMAGE}:${ref_tag}"
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:20128/api/health; then
+              echo "Health check passed"
+              exit 0
+            fi
+            if (( attempt % 5 == 0 )); then
+              echo "Waiting for health check (${attempt}/30)" >&2
+            fi
+            sleep 2
+          done
+
+          echo "Health check failed; container logs follow:" >&2
+          docker logs "$container" || true
+          exit 1

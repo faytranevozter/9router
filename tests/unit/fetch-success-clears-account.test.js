@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   clearAccountError: vi.fn(),
   extractApiKey: vi.fn(() => null),
   isValidApiKey: vi.fn(),
+  checkApiKeyQuota: vi.fn(async () => null),
   getSettings: vi.fn(),
   getCombos: vi.fn(),
   handleFetchCore: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/sse/services/auth.js", () => ({
   clearAccountError: mocks.clearAccountError,
   extractApiKey: mocks.extractApiKey,
   isValidApiKey: mocks.isValidApiKey,
+  checkApiKeyQuota: mocks.checkApiKeyQuota,
 }));
 
 vi.mock("@/lib/localDb", () => ({

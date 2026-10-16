@@ -82,7 +82,12 @@ export const TABLES = {
       name: "TEXT",
       machineId: "TEXT",
       isActive: "INTEGER DEFAULT 1",
+      // Per-key token quota. Additive columns, picked up by
+      // syncSchemaFromTables() on boot; existing rows read as 0 (unlimited).
+      tokenLimit: "INTEGER DEFAULT 0",
+      usedTokens: "INTEGER DEFAULT 0",
       createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT",
       // Per-key access control. Additive columns, picked up by
       // syncSchemaFromTables() on boot; existing rows read as unrestricted (0).
       accessRestricted: "INTEGER DEFAULT 0",
