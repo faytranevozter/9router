@@ -39,6 +39,17 @@ const fmtDate = (iso) => {
   }
 };
 
+// Relative "Xs ago" — the parent re-renders on each SSE tick, so this stays fresh
+// without its own interval.
+const relTime = (iso) => {
+  if (!iso) return "—";
+  const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (diff < 60) return `${Math.max(0, diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+};
+
 // One breakdown table (by model / provider / endpoint).
 function BreakdownTable({ title, rows, labelKey, empty }) {
   const total = rows.reduce((s, r) => s + (r.promptTokens || 0) + (r.completionTokens || 0), 0) || 1;
@@ -121,8 +132,8 @@ Stat.propTypes = {
   tone: PropTypes.string,
 };
 
-export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage }) {
-  const [period, setPeriod] = useState("all");
+export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialPeriod = "all", liveRequests = null, inFlight = 0 }) {
+  const [period, setPeriod] = useState(initialPeriod);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -250,6 +261,44 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage }) {
           </button>
         </div>
 
+        {/* Live activity — fed by the parent's SSE stream (in-flight + recent tail) */}
+        {(inFlight > 0 || (liveRequests && liveRequests.length > 0)) && (
+          <div className="rounded-xl border border-border overflow-hidden">
+            <div className="px-3 py-2 bg-surface-2/60 border-b border-border flex items-center justify-between">
+              <span className="text-xs font-semibold text-text-main flex items-center gap-2">
+                <span className="relative flex size-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-60" />
+                  <span className="relative inline-flex rounded-full size-2 bg-green-500" />
+                </span>
+                Live activity
+              </span>
+              {inFlight > 0 && (
+                <span className="text-[11px] font-medium text-primary tabular-nums">
+                  {inFlight} in flight
+                </span>
+              )}
+            </div>
+            {!liveRequests?.length ? (
+              <p className="px-3 py-3 text-xs text-text-muted text-center">Waiting for the first completed request…</p>
+            ) : (
+              <div className="flex flex-col max-h-44 overflow-y-auto">
+                {liveRequests.map((r, i) => {
+                  const ok = !r.status || r.status === "ok" || r.status === "success";
+                  return (
+                    <div key={`${r.timestamp}-${i}`} className="flex items-center gap-3 px-3 py-1.5 border-b border-border/60 last:border-b-0 text-[11px]">
+                      <span className={`block w-1.5 h-1.5 rounded-full shrink-0 ${ok ? "bg-green-500" : "bg-red-500"}`} />
+                      <span className="font-mono text-text-main truncate flex-1 min-w-0" title={r.model}>{r.model || "unknown"}</span>
+                      <span className="text-primary tabular-nums shrink-0">{fmtTokens(r.promptTokens)}↑</span>
+                      <span className="text-success tabular-nums shrink-0">{fmtTokens(r.completionTokens)}↓</span>
+                      <span className="text-text-muted tabular-nums shrink-0 w-16 text-right">{relTime(r.timestamp)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {loading ? (
           <div className="py-10 text-center text-sm text-text-muted">
             <span className="material-symbols-outlined animate-spin text-[22px] block mb-1">progress_activity</span>
@@ -326,4 +375,10 @@ KeyQuotaDetail.propTypes = {
   }),
   onClose: PropTypes.func.isRequired,
   onResetUsage: PropTypes.func,
+  // Period the panel opens on (deep links pass the page period; default "all").
+  initialPeriod: PropTypes.string,
+  // Live tail for this key (raw recent requests) + current in-flight count,
+  // both optional: when absent the panel behaves as before.
+  liveRequests: PropTypes.arrayOf(PropTypes.object),
+  inFlight: PropTypes.number,
 };

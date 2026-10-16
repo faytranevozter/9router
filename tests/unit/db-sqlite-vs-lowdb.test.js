@@ -312,11 +312,56 @@ describe("DB SQLite layer — public API parity", () => {
     expect(stats.byProvider.openai.promptTokens).toBeGreaterThanOrEqual(300);
   });
 
-  it("usage: pending tracking in-memory", () => {
-    sqliteDb.trackPendingRequest("gpt-4", "openai", "c1", true);
+  it("usage: pending tracking in-memory (byModel + byApiKey)", () => {
+    sqliteDb.trackPendingRequest("gpt-4", "openai", "c1", true, false, "sk-live-key");
     expect(global._pendingRequests.byModel["gpt-4 (openai)"]).toBe(1);
-    sqliteDb.trackPendingRequest("gpt-4", "openai", "c1", false);
+    expect(global._pendingRequests.byApiKey["sk-live-key"]["gpt-4 (openai)"]).toBe(1);
+    sqliteDb.trackPendingRequest("gpt-4", "openai", "c1", false, false, "sk-live-key");
     expect(global._pendingRequests.byModel["gpt-4 (openai)"]).toBeUndefined();
+    expect(global._pendingRequests.byApiKey["sk-live-key"]).toBeUndefined();
+  });
+
+  it("usage: getApiKeysUsage — per key, zero-usage key, local row, reconciling totals", async () => {
+    const k = await sqliteDb.createApiKey("usage-key", "machine-usage", { tokenLimit: 1000 });
+    const idle = await sqliteDb.createApiKey("idle-key", "machine-usage");
+
+    await sqliteDb.saveRequestUsage({
+      provider: "openai", model: "gpt-4", connectionId: "c1", apiKey: k.key,
+      tokens: { prompt_tokens: 100, completion_tokens: 50 },
+      endpoint: "/v1/chat/completions", status: "ok",
+    });
+    await sqliteDb.saveRequestUsage({
+      provider: "openai", model: "gpt-4", connectionId: "c1",
+      tokens: { prompt_tokens: 10, completion_tokens: 5 },
+      endpoint: "/v1/chat/completions", status: "ok",
+    });
+
+    const res = await sqliteDb.getApiKeysUsage("all");
+    expect(res.period).toBe("all");
+
+    const row = res.keys.find((r) => r.id === k.id);
+    expect(row).toBeDefined();
+    expect(row.key).toBe(k.key);
+    expect(row.requests).toBe(1);
+    expect(row.totalTokens).toBe(150);
+    expect(row.usedTokens).toBe(150); // quota gate counter incremented alongside
+    expect(row.tokenLimit).toBe(1000);
+    expect(row.percent).toBeCloseTo(15, 5);
+
+    // A key with no traffic still appears (zeroed, unlimited).
+    const idleRow = res.keys.find((r) => r.id === idle.id);
+    expect(idleRow).toBeDefined();
+    expect(idleRow.requests).toBe(0);
+    expect(idleRow.unlimited).toBe(true);
+
+    // Traffic that carried no key becomes one synthetic local row.
+    const local = res.keys.find((r) => r.isLocal);
+    expect(local).toBeDefined();
+    expect(local.name).toBe("Local (No API Key)");
+
+    // Totals reconcile with the emitted rows (no double counting, no orphan drift).
+    const sum = res.keys.reduce((s, r) => s + r.requests, 0);
+    expect(res.total.requests).toBe(sum);
   });
 
   it("requestDetails: save → query with paging", async () => {

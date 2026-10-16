@@ -17,7 +17,10 @@ const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 
 // In-memory state shared across Next.js modules
-if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
+if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {}, byApiKey: {} };
+// Older in-process state (or a running dev server that loaded this module before
+// the apiKey dimension shipped) may lack the key — backfill it.
+if (!global._pendingRequests.byApiKey) global._pendingRequests.byApiKey = {};
 if (!global._lastErrorProvider) global._lastErrorProvider = { provider: "", ts: 0 };
 if (!global._statsEmitter) {
   global._statsEmitter = new EventEmitter();
@@ -50,6 +53,18 @@ function scheduleStatsEvent(event, delayMs = 150) {
 function getLocalDateKey(timestamp) {
   const d = timestamp ? new Date(timestamp) : new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Resolve a period label to an ISO cutoff (inclusive lower bound) or null for
+// "all". Single source so getApiKeyUsage and getApiKeysUsage never drift.
+function periodCutoff(period) {
+  if (period === "today") {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    return startOfDay.toISOString();
+  }
+  if (PERIOD_MS[period]) return new Date(Date.now() - PERIOD_MS[period]).toISOString();
+  return null;
 }
 
 function addToCounter(target, key, values) {
@@ -151,9 +166,10 @@ async function calculateCost(provider, model, tokens) {
   }
 }
 
-export function trackPendingRequest(model, provider, connectionId, started, error = false) {
+export function trackPendingRequest(model, provider, connectionId, started, error = false, apiKey = null) {
   const modelKey = provider ? `${model} (${provider})` : model;
   const timerKey = `${connectionId}|${modelKey}`;
+  const apiKeyVal = apiKey && typeof apiKey === "string" && apiKey.trim() ? apiKey.trim() : null;
 
   if (!pendingRequests.byModel[modelKey]) pendingRequests.byModel[modelKey] = 0;
   pendingRequests.byModel[modelKey] = Math.max(0, pendingRequests.byModel[modelKey] + (started ? 1 : -1));
@@ -171,6 +187,20 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
     }
   }
 
+  // Per-API-key in-flight dimension: lets the API-key usage page show which key
+  // has a request in flight (byAccount only knows the provider account).
+  if (apiKeyVal) {
+    if (!pendingRequests.byApiKey[apiKeyVal]) pendingRequests.byApiKey[apiKeyVal] = {};
+    if (!pendingRequests.byApiKey[apiKeyVal][modelKey]) pendingRequests.byApiKey[apiKeyVal][modelKey] = 0;
+    pendingRequests.byApiKey[apiKeyVal][modelKey] = Math.max(0, pendingRequests.byApiKey[apiKeyVal][modelKey] + (started ? 1 : -1));
+    if (pendingRequests.byApiKey[apiKeyVal][modelKey] === 0) {
+      delete pendingRequests.byApiKey[apiKeyVal][modelKey];
+      if (Object.keys(pendingRequests.byApiKey[apiKeyVal]).length === 0) {
+        delete pendingRequests.byApiKey[apiKeyVal];
+      }
+    }
+  }
+
   if (started) {
     clearTimeout(pendingTimers[timerKey]);
     pendingTimers[timerKey] = setTimeout(() => {
@@ -178,6 +208,12 @@ export function trackPendingRequest(model, provider, connectionId, started, erro
       if (pendingRequests.byModel[modelKey] > 0) pendingRequests.byModel[modelKey] = 0;
       if (connectionId && pendingRequests.byAccount[connectionId]?.[modelKey] > 0) {
         pendingRequests.byAccount[connectionId][modelKey] = 0;
+      }
+      if (apiKeyVal && pendingRequests.byApiKey[apiKeyVal]?.[modelKey] > 0) {
+        delete pendingRequests.byApiKey[apiKeyVal][modelKey];
+        if (Object.keys(pendingRequests.byApiKey[apiKeyVal]).length === 0) {
+          delete pendingRequests.byApiKey[apiKeyVal];
+        }
       }
       scheduleStatsEvent("pending");
     }, PENDING_TIMEOUT_MS);
@@ -221,6 +257,10 @@ export async function getActiveRequests() {
       const t = e.tokens || {};
       return {
         timestamp: e.timestamp, model: e.model, provider: e.provider || "",
+        // Raw key (or null) so the per-key page can filter its live tail. Ring
+        // entries initialized from history carry it; pushToRing stores the whole
+        // saveRequestUsage entry, which includes apiKey.
+        apiKey: e.apiKey || null,
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         status: e.status || "ok",
@@ -237,7 +277,7 @@ export async function getActiveRequests() {
     .slice(0, 20);
 
   const errorProvider = (Date.now() - lastErrorProvider.ts < 10000) ? lastErrorProvider.provider : "";
-  return { activeRequests, recentRequests, errorProvider };
+  return { activeRequests, recentRequests, errorProvider, activeByKey: pendingRequests.byApiKey };
 }
 
 export async function saveRequestUsage(entry) {
@@ -383,13 +423,15 @@ export async function getUsageStats(period = "all") {
   }
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
-  const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
+  const recentRows = db.all(`SELECT timestamp, provider, model, apiKey, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
   const seen = new Set();
   const recentRequests = recentRows
     .map((r) => {
       const t = parseJson(r.tokens, {}) || {};
       return {
         timestamp: r.timestamp, model: r.model, provider: r.provider || "",
+        // Per-key live feed support (raw key or null for local/no-key traffic).
+        apiKey: r.apiKey || null,
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         cachedTokens: t.cached_tokens || t.cache_read_input_tokens || 0,
@@ -413,6 +455,10 @@ export async function getUsageStats(period = "all") {
     last10Minutes: [],
     pending: pendingRequests,
     activeRequests: [],
+    // Top-level convenience mirror of pendingRequests.byApiKey so SSE consumers
+    // (the API-key usage page) can read in-flight counts per key without unwrapping
+    // `pending`. getActiveRequests() exposes the same field on `pending` ticks.
+    activeByKey: pendingRequests.byApiKey,
     recentRequests,
     errorProvider: (Date.now() - lastErrorProvider.ts < 10000) ? lastErrorProvider.provider : "",
   };
@@ -704,11 +750,9 @@ export async function getApiKeyUsage(key, period = "all") {
 
   let cutoff = null;
   if (period === "today") {
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    cutoff = startOfDay.toISOString();
+    cutoff = periodCutoff("today");
   } else if (PERIOD_MS[period]) {
-    cutoff = new Date(Date.now() - PERIOD_MS[period]).toISOString();
+    cutoff = periodCutoff(period);
   }
 
   const cols = `timestamp, provider, model, endpoint, promptTokens, completionTokens, cost, tokens`;
@@ -793,6 +837,138 @@ export async function getApiKeyUsage(key, period = "all") {
     byProvider: Object.values(byProvider).sort(byTokens),
     byEndpoint: Object.values(byEndpoint).sort((a, b) => b.requests - a.requests),
   };
+}
+
+/**
+ * Per-API-key usage for a selectable period — one row per existing key.
+ *
+ * One grouped scan of usageHistory (no N+1), joined in memory against
+ * getApiKeys() so keys with no traffic still appear (zeroed). Traffic whose
+ * apiKey is NULL/empty becomes one synthetic "Local (No API Key)" row (only
+ * added when such traffic exists). Quota numbers are the same lifetime gate
+ * counter as getApiKeyUsage (usedTokens/tokenLimit), shown separately from the
+ * period totals — the two can legitimately differ.
+ *
+ * @param {string} period - "all" (default) | "today" | "24h" | "7d" | "30d" | "60d"
+ */
+export async function getApiKeysUsage(period = "all") {
+  const db = await getAdapter();
+  const { getApiKeys } = await import("./apiKeysRepo.js");
+
+  const cutoff = periodCutoff(period);
+  const baseSql = `SELECT apiKey,
+                          COUNT(*)                            AS requests,
+                          COALESCE(SUM(promptTokens), 0)      AS promptTokens,
+                          COALESCE(SUM(completionTokens), 0)  AS completionTokens,
+                          COALESCE(SUM(cost), 0)              AS cost,
+                          MAX(timestamp)                      AS lastUsed
+                   FROM usageHistory`;
+  // cached tokens live in the `tokens` JSON only — leave them to the per-key detail.
+  const rows = cutoff
+    ? db.all(`${baseSql} WHERE timestamp >= ? GROUP BY apiKey`, [cutoff])
+    : db.all(`${baseSql} GROUP BY apiKey`);
+
+  const usageByKey = {};
+  let localUsage = null;
+  for (const r of rows) {
+    const rec = {
+      requests: Number(r.requests) || 0,
+      promptTokens: Number(r.promptTokens) || 0,
+      completionTokens: Number(r.completionTokens) || 0,
+      cost: Number(r.cost) || 0,
+      lastUsed: r.lastUsed || null,
+    };
+    const keyVal = typeof r.apiKey === "string" ? r.apiKey.trim() : "";
+    if (keyVal) usageByKey[keyVal] = rec;
+    else localUsage = rec;
+  }
+
+  const activeByKey = pendingRequests.byApiKey || {};
+  const activeCount = (keyVal) => {
+    if (!keyVal) return 0;
+    const models = activeByKey[keyVal];
+    if (!models) return 0;
+    return Object.values(models).reduce((sum, n) => sum + (n > 0 ? n : 0), 0);
+  };
+
+  const ZERO_USAGE = { requests: 0, promptTokens: 0, completionTokens: 0, cost: 0, lastUsed: null };
+
+  const quotaOf = (tokenLimit, usedTokens) => {
+    const limit = Number(tokenLimit) || 0;
+    const used = Number(usedTokens) || 0;
+    const unlimited = limit === 0;
+    const percent = unlimited ? 0 : Math.min(100, (used / limit) * 100);
+    return {
+      tokenLimit: limit,
+      usedTokens: used,
+      unlimited,
+      percent,
+      remaining: unlimited ? null : Math.max(0, limit - used),
+      exceeded: !unlimited && used >= limit,
+      warning: !unlimited && used < limit && used / limit >= 0.8,
+    };
+  };
+
+  let allApiKeys = [];
+  try { allApiKeys = await getApiKeys(); } catch {}
+
+  const keys = [];
+  const total = { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0 };
+
+  const pushRow = (row, usage) => {
+    const totalTokens = usage.promptTokens + usage.completionTokens;
+    keys.push({ ...row, ...usage, totalTokens });
+    total.requests += usage.requests;
+    total.promptTokens += usage.promptTokens;
+    total.completionTokens += usage.completionTokens;
+    total.totalTokens += totalTokens;
+    total.cost += usage.cost;
+  };
+
+  for (const k of allApiKeys) {
+    const keyVal = (k.key || "").trim();
+    pushRow(
+      {
+        id: k.id,
+        name: k.name,
+        // Raw key: the page matches it against the live activeByKey/recentRequests
+        // feeds. Keys are already exposed to the authenticated dashboard via /api/keys.
+        key: keyVal,
+        keyMasked: maskApiKey(keyVal),
+        isActive: k.isActive,
+        createdAt: k.createdAt,
+        ...quotaOf(k.tokenLimit, k.usedTokens),
+        active: activeCount(keyVal),
+        isLocal: false,
+      },
+      usageByKey[keyVal] || ZERO_USAGE
+    );
+  }
+
+  if (localUsage) {
+    pushRow(
+      {
+        id: null,
+        name: "Local (No API Key)",
+        key: null,
+        keyMasked: null,
+        isActive: true,
+        createdAt: null,
+        tokenLimit: 0,
+        usedTokens: 0,
+        unlimited: true,
+        percent: 0,
+        remaining: null,
+        exceeded: false,
+        warning: false,
+        active: 0,
+        isLocal: true,
+      },
+      localUsage
+    );
+  }
+
+  return { period, keys, total };
 }
 
 export async function getChartData(period = "7d") {

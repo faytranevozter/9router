@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
 import UsageStats from "@/shared/components/UsageStats";
 import RequestDetailsTab from "./components/RequestDetailsTab";
@@ -55,13 +56,24 @@ function UsageContent() {
           className="w-full sm:w-auto"
         />
         {activeTab === "overview" && (
-          <SegmentedControl
-            options={PERIODS}
-            value={period}
-            onChange={setPeriod}
-            size="sm"
-            className="w-full sm:w-auto"
-          />
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <SegmentedControl
+              options={PERIODS}
+              value={period}
+              onChange={setPeriod}
+              size="sm"
+              className="w-full sm:w-auto"
+            />
+            {/* Jump to the dedicated per-key view, preserving the period. */}
+            <Link
+              href={`/dashboard/usage/by-key?period=${period}`}
+              className="flex h-7 shrink-0 items-center gap-1 rounded-[8px] border border-border px-3 text-xs font-medium text-text-muted transition-colors hover:border-primary/40 hover:text-primary"
+              title="Monitor usage per API key"
+            >
+              <span className="material-symbols-outlined text-[15px]">vpn_key</span>
+              All key usage
+            </Link>
+          </div>
         )}
       </div>
 

@@ -23,6 +23,7 @@ const navItems = [
   // { href: "/dashboard/basic-chat", label: "Basic Chat", icon: "chat" }, // Hidden
   { href: "/dashboard/combos", label: "Combo & Vision Adapter", icon: "layers" },
   { href: "/dashboard/usage", label: "Usage", icon: "bar_chart" },
+  { href: "/dashboard/usage/by-key", label: "API Key Usage", icon: "vpn_key" },
   { href: "/dashboard/quota", label: "Quota Tracker", icon: "data_usage" },
   { href: "/dashboard/token-saver", label: "Token Saver", icon: "savings" },
   // { href: "/dashboard/pxpipe", label: "PXPIPE", icon: "image" },
@@ -73,6 +74,9 @@ export default function Sidebar({ onClose }) {
     if (href === "/dashboard/endpoint") {
       return pathname === "/dashboard" || pathname.startsWith("/dashboard/endpoint");
     }
+    // "/dashboard/usage" owns the plain Usage page only — its by-key sub-route is
+    // a separate nav item, so don't highlight Usage there too.
+    if (href === "/dashboard/usage") return pathname === "/dashboard/usage";
     return pathname.startsWith(href);
   };
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
+import Link from "next/link";
 import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
@@ -1200,6 +1201,13 @@ export default function APIPageClient({ machineId }) {
                   >
                     <span className="material-symbols-outlined text-[18px]">bar_chart</span>
                   </button>
+                  <Link
+                    href={`/dashboard/usage/by-key?key=${key.id}&period=7d`}
+                    className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
+                    title="Open in API Key Usage"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                  </Link>
                   <button
                     onClick={() => handleOpenEditModal(key)}
                     className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"

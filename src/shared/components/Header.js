@@ -84,6 +84,14 @@ const getPageInfo = (pathname) => {
       icon: "layers",
       breadcrumbs: [],
     };
+  if (pathname.includes("/usage/by-key"))
+    return {
+      title: "API Key Usage",
+      description:
+        "Per-API-key requests, tokens, cost, quota and live in-flight activity",
+      icon: "vpn_key",
+      breadcrumbs: [],
+    };
   if (pathname.includes("/usage"))
     return {
       title: "Usage & Analytics",
