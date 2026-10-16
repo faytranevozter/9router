@@ -19,6 +19,7 @@ import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 import KeyAccessControls from "./components/KeyAccessControls";
+import KeyQuotaDetail from "./components/KeyQuotaDetail";
 export default function APIPageClient({ machineId }) {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +34,9 @@ export default function APIPageClient({ machineId }) {
   const [editKeyTokenLimit, setEditKeyTokenLimit] = useState("");
   const [editKeyUsedTokens, setEditKeyUsedTokens] = useState(0);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Detailed per-key quota view.
+  const [detailKey, setDetailKey] = useState(null);
 
   const [requireApiKey, setRequireApiKey] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
@@ -694,6 +698,33 @@ export default function APIPageClient({ machineId }) {
     });
   };
 
+  // Reset a key's used-tokens counter to 0 (from the detail view, persists immediately).
+  const handleResetKeyUsage = (key) => {
+    setConfirmState({
+      title: "Reset Token Usage",
+      message: `Reset the used tokens counter for "${key.name}" to 0?\n\nThe key becomes usable again immediately (its limit is unchanged).`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          const res = await fetch(`/api/keys/${key.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ usedTokens: 0 }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.key) {
+              setKeys(prev => prev.map(k => k.id === key.id ? { ...k, ...data.key } : k));
+              setDetailKey(prev => (prev && prev.id === key.id ? { ...prev, ...data.key } : prev));
+            }
+          }
+        } catch (error) {
+          console.log("Error resetting key usage:", error);
+        }
+      }
+    });
+  };
+
   const handleDeleteKey = async (id) => {
     setConfirmState({
       title: "Delete API Key",
@@ -1163,6 +1194,13 @@ export default function APIPageClient({ machineId }) {
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
                   <button
+                    onClick={() => setDetailKey(key)}
+                    className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
+                    title="View detailed quota usage"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">bar_chart</span>
+                  </button>
+                  <button
                     onClick={() => handleOpenEditModal(key)}
                     className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
                     title="Edit token quota"
@@ -1301,6 +1339,13 @@ export default function APIPageClient({ machineId }) {
           </div>
         </div>
       </Modal>
+
+      {/* Detailed Key Quota Modal */}
+      <KeyQuotaDetail
+        apiKey={detailKey}
+        onClose={() => setDetailKey(null)}
+        onResetUsage={() => detailKey && handleResetKeyUsage(detailKey)}
+      />
 
       {/* Created Key Modal */}
       <Modal

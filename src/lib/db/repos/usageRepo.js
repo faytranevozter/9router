@@ -682,6 +682,119 @@ export async function getUsageStats(period = "all") {
   return stats;
 }
 
+/**
+ * Detailed per-API-key usage for the dashboard quota view.
+ *
+ * Totals come from usageHistory (everything attributed to the key) and cover the
+ * requested period; the quota itself (`quota.used`) is the key row's `usedTokens`
+ * gate counter (prompt + completion since the quota feature shipped), so the two
+ * can legitimately differ. Returns null for an unknown/empty key.
+ *
+ * @param {string} key - the raw API key value
+ * @param {string} period - "all" (default) | "today" | "24h" | "7d" | "30d" | "60d"
+ */
+export async function getApiKeyUsage(key, period = "all") {
+  const db = await getAdapter();
+  const keyVal = typeof key === "string" ? key.trim() : "";
+  if (!keyVal) return null;
+
+  const { getApiKeyByKey } = await import("./apiKeysRepo.js");
+  const record = await getApiKeyByKey(keyVal);
+  if (!record) return null;
+
+  let cutoff = null;
+  if (period === "today") {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    cutoff = startOfDay.toISOString();
+  } else if (PERIOD_MS[period]) {
+    cutoff = new Date(Date.now() - PERIOD_MS[period]).toISOString();
+  }
+
+  const cols = `timestamp, provider, model, endpoint, promptTokens, completionTokens, cost, tokens`;
+  const rows = cutoff
+    ? db.all(`SELECT ${cols} FROM usageHistory WHERE apiKey = ? AND timestamp >= ? ORDER BY id ASC`, [keyVal, cutoff])
+    : db.all(`SELECT ${cols} FROM usageHistory WHERE apiKey = ? ORDER BY id ASC`, [keyVal]);
+
+  let requests = 0, promptTokens = 0, completionTokens = 0, cachedTokens = 0, cost = 0;
+  let firstUsed = null, lastUsed = null;
+  const byModel = {};
+  const byProvider = {};
+  const byEndpoint = {};
+  const dailyMap = {};
+
+  for (const r of rows) {
+    const t = parseJson(r.tokens, {}) || {};
+    const p = t.prompt_tokens || t.input_tokens || r.promptTokens || 0;
+    const c = t.completion_tokens || t.output_tokens || r.completionTokens || 0;
+    const cached = t.cached_tokens || t.cache_read_input_tokens || 0;
+    const entryCost = r.cost || 0;
+
+    requests++;
+    promptTokens += p; completionTokens += c; cachedTokens += cached; cost += entryCost;
+    if (!firstUsed || r.timestamp < firstUsed) firstUsed = r.timestamp;
+    if (!lastUsed || r.timestamp > lastUsed) lastUsed = r.timestamp;
+
+    const mk = r.model || "unknown";
+    byModel[mk] ||= { model: r.model || "unknown", provider: r.provider || "", requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+    byModel[mk].requests++; byModel[mk].promptTokens += p; byModel[mk].completionTokens += c; byModel[mk].cachedTokens += cached; byModel[mk].cost += entryCost;
+
+    const pk = r.provider || "unknown";
+    byProvider[pk] ||= { provider: pk, requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+    byProvider[pk].requests++; byProvider[pk].promptTokens += p; byProvider[pk].completionTokens += c; byProvider[pk].cachedTokens += cached; byProvider[pk].cost += entryCost;
+
+    const ek = r.endpoint || "Unknown";
+    byEndpoint[ek] ||= { endpoint: ek, requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
+    byEndpoint[ek].requests++; byEndpoint[ek].promptTokens += p; byEndpoint[ek].completionTokens += c; byEndpoint[ek].cachedTokens += cached; byEndpoint[ek].cost += entryCost;
+
+    const dk = getLocalDateKey(r.timestamp);
+    dailyMap[dk] ||= { date: dk, requests: 0, promptTokens: 0, completionTokens: 0, tokens: 0, cost: 0 };
+    dailyMap[dk].requests++; dailyMap[dk].promptTokens += p; dailyMap[dk].completionTokens += c; dailyMap[dk].tokens += (p + c); dailyMap[dk].cost += entryCost;
+  }
+
+  const limit = Number(record.tokenLimit) || 0;
+  const used = Number(record.usedTokens) || 0;
+  const unlimited = limit === 0;
+  const percent = unlimited ? 0 : Math.min(100, (used / limit) * 100);
+
+  const byTokens = (a, b) => (b.promptTokens + b.completionTokens) - (a.promptTokens + a.completionTokens);
+
+  return {
+    key: {
+      id: record.id,
+      name: record.name,
+      keyMasked: maskApiKey(keyVal),
+      isActive: record.isActive,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt || null,
+    },
+    quota: {
+      tokenLimit: limit,
+      usedTokens: used,
+      remaining: unlimited ? null : Math.max(0, limit - used),
+      unlimited,
+      percent,
+      exceeded: !unlimited && used >= limit,
+      warning: !unlimited && used < limit && used / limit >= 0.8,
+    },
+    period,
+    totals: {
+      requests,
+      promptTokens,
+      completionTokens,
+      cachedTokens,
+      totalTokens: promptTokens + completionTokens,
+      cost,
+      firstUsed,
+      lastUsed,
+    },
+    daily: Object.values(dailyMap).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)),
+    byModel: Object.values(byModel).sort(byTokens),
+    byProvider: Object.values(byProvider).sort(byTokens),
+    byEndpoint: Object.values(byEndpoint).sort((a, b) => b.requests - a.requests),
+  };
+}
+
 export async function getChartData(period = "7d") {
   const db = await getAdapter();
   const now = Date.now();
