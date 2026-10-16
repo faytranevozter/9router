@@ -156,7 +156,10 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
   }, [keyId, period]);
 
   useEffect(() => {
-    fetchData();
+    // Defer the initial fetch out of the effect body: fetchData sets loading
+    // synchronously before awaiting, which trips React's cascading-render rule.
+    const timer = setTimeout(fetchData, 0);
+    return () => clearTimeout(timer);
   }, [fetchData]);
 
   // Hooks run unconditionally above; the panel only renders with a key selected.
@@ -169,6 +172,11 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
   const limit = quota?.tokenLimit ?? apiKey.tokenLimit ?? 0;
   const percent = quota?.percent ?? (unlimited ? 0 : Math.min(100, (used / limit) * 100));
   const exceeded = quota?.exceeded ?? (!unlimited && used >= limit);
+  // Guard the live tail at the display boundary as well as at the page caller,
+  // so a future caller can't accidentally show another API key's requests.
+  const keyLiveRequests = liveRequests?.filter((request) =>
+    request.apiKey && apiKey?.key && request.apiKey.trim() === apiKey.key.trim()
+  ) || [];
 
   const barColor = exceeded
     ? "bg-red-500"
@@ -178,7 +186,10 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
 
   return (
     <Modal isOpen title={`Token Quota — ${apiKey.name || ""}`} onClose={onClose} size="full">
-      <div className="flex flex-col gap-4 max-h-[75vh] overflow-y-auto pr-0.5">
+      {/* Modal owns the viewport-sized scroll area. Avoid a second max-height
+          scroller here: nested scrolling clipped the live panel and made the
+          breakdown tables appear cut off in the quota detail view. */}
+      <div className="flex flex-col gap-4 pr-0.5">
         {/* Quota summary */}
         <div className="rounded-xl border border-border p-3.5">
           <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -262,7 +273,7 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
         </div>
 
         {/* Live activity — fed by the parent's SSE stream (in-flight + recent tail) */}
-        {(inFlight > 0 || (liveRequests && liveRequests.length > 0)) && (
+        {(inFlight > 0 || keyLiveRequests.length > 0) && (
           <div className="rounded-xl border border-border overflow-hidden">
             <div className="px-3 py-2 bg-surface-2/60 border-b border-border flex items-center justify-between">
               <span className="text-xs font-semibold text-text-main flex items-center gap-2">
@@ -278,11 +289,11 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
                 </span>
               )}
             </div>
-            {!liveRequests?.length ? (
+            {!keyLiveRequests.length ? (
               <p className="px-3 py-3 text-xs text-text-muted text-center">Waiting for the first completed request…</p>
             ) : (
-              <div className="flex flex-col max-h-44 overflow-y-auto">
-                {liveRequests.map((r, i) => {
+              <div className="flex flex-col">
+                {keyLiveRequests.map((r, i) => {
                   const ok = !r.status || r.status === "ok" || r.status === "success";
                   return (
                     <div key={`${r.timestamp}-${i}`} className="flex items-center gap-3 px-3 py-1.5 border-b border-border/60 last:border-b-0 text-[11px]">
