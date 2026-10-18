@@ -24,6 +24,7 @@ function rowToKey(row) {
     updatedAt: row.updatedAt || null,
     expiresAt: row.expiresAt ?? null,
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
+    publicShare: row.publicShare === 1 || row.publicShare === true,
   };
 }
 
@@ -55,6 +56,7 @@ export async function createApiKey(name, machineId, options = {}) {
   const now = new Date().toISOString();
   const tokenLimit = options.tokenLimit != null ? Math.max(0, Number(options.tokenLimit) || 0) : 0;
   const access = options.access || KEY_ACCESS_UNRESTRICTED;
+  const publicShare = options.publicShare === true;
   const apiKey = {
     id: uuidv4(),
     name,
@@ -67,10 +69,11 @@ export async function createApiKey(name, machineId, options = {}) {
     createdAt: now,
     updatedAt: now,
     access,
+    publicShare,
   };
   const cols = keyAccessToColumns(access);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, createdAt, updatedAt, accessRestricted, accessAllow, expiresAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, createdAt, updatedAt, accessRestricted, accessAllow, expiresAt, publicShare) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -84,6 +87,7 @@ export async function createApiKey(name, machineId, options = {}) {
       cols.accessRestricted,
       cols.accessAllow,
       apiKey.expiresAt,
+      publicShare ? 1 : 0,
     ]
   );
   return apiKey;
@@ -103,7 +107,7 @@ export async function updateApiKey(id, data) {
     const usedTokens = merged.usedTokens != null ? Math.max(0, Number(merged.usedTokens) || 0) : 0;
     const cols = keyAccessToColumns(merged.access || KEY_ACCESS_UNRESTRICTED);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ?, expiresAt = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ?, expiresAt = ?, publicShare = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -115,6 +119,7 @@ export async function updateApiKey(id, data) {
         cols.accessRestricted,
         cols.accessAllow,
         merged.expiresAt,
+        merged.publicShare === true ? 1 : 0,
         id,
       ]
     );

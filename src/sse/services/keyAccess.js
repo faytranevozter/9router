@@ -62,6 +62,21 @@ export function extractClientApiKey(request) {
 }
 
 /**
+ * Access context for an already-loaded key record, or null when unrestricted.
+ * Split out of getKeyAccessContext so a caller that has the record (and not the
+ * key string) — the public status page — builds the same context.
+ */
+export function keyAccessContextFromRecord(record) {
+  if (!record?.access?.restricted) return null;
+  return {
+    keyId: record.id,
+    keyName: record.name || record.id,
+    allow: record.access.allow || [],
+    _sets: null,
+  };
+}
+
+/**
  * Access context for the request's key, or null when the request is
  * unrestricted (no key, unknown key, or a key whose access is unrestricted).
  * Keys are only authenticated elsewhere (middleware / requireApiKey); this only
@@ -71,13 +86,7 @@ export async function getKeyAccessContext(request) {
   const apiKey = extractClientApiKey(request);
   if (!apiKey) return null;
   const record = await getApiKeyByKey(apiKey);
-  if (!record?.access?.restricted) return null;
-  return {
-    keyId: record.id,
-    keyName: record.name || record.id,
-    allow: record.access.allow || [],
-    _sets: null,
-  };
+  return keyAccessContextFromRecord(record);
 }
 
 // Resolve the allow list once per request: combo names, resolved model ids,

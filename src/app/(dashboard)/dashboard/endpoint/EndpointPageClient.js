@@ -20,6 +20,7 @@ import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 import KeyAccessControls from "./components/KeyAccessControls";
+import KeyPublicShare from "./components/KeyPublicShare";
 import KeyQuotaDetail from "./components/KeyQuotaDetail";
 import KeyExpirationField from "./components/KeyExpirationField";
 import { expirationToLocalInput, localInputToExpiration, isKeyExpired } from "@/shared/utils/keyExpiration";
@@ -820,6 +821,29 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
     }
   };
 
+  // Toggle a key's public status page (/k/{id}). Off revokes the link instantly.
+  const handleTogglePublicShare = async (id, publicShare) => {
+    // Optimistic: the toggle must feel immediate; revert on failure.
+    setKeys(prev => prev.map(k => k.id === id ? { ...k, publicShare } : k));
+    try {
+      const res = await fetch(`/api/keys/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publicShare }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.key) {
+        setKeys(prev => prev.map(k => k.id === id ? { ...k, publicShare: !publicShare } : k));
+        console.log("Error updating key sharing:", data.error || res.status);
+      } else {
+        setKeys(prev => prev.map(k => k.id === id ? { ...k, publicShare: data.key.publicShare } : k));
+      }
+    } catch (error) {
+      setKeys(prev => prev.map(k => k.id === id ? { ...k, publicShare: !publicShare } : k));
+      console.log("Error updating key sharing:", error);
+    }
+  };
+
   const maskKey = (fullKey) => {
     if (!fullKey || fullKey.length <= 10) return fullKey || "";
     return fullKey.slice(0, 6) + "••••••" + fullKey.slice(-4);
@@ -1276,8 +1300,11 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
                   <Link href={`/dashboard/usage/by-key?key=${key.id}&period=7d`} title="Open in API Key Usage" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
                     <span className="material-symbols-outlined text-[18px]">open_in_new</span>
                   </Link>
-                  <button onClick={() => handleOpenEditModal(key)} title="Edit quota and expiration" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
+                  <button onClick={() => handleOpenEditModal(key)} title="Edit quota, expiration and sharing" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
                     <span className="material-symbols-outlined text-[18px]">edit</span>
+                  </button>
+                  <button onClick={() => handleTogglePublicShare(key.id, key.publicShare !== true)} title={key.publicShare ? "Public status page is on — click to revoke" : "Share public status page"} className={`inline-flex size-8 items-center justify-center rounded-lg hover:bg-surface-2 ${key.publicShare ? "text-primary" : "text-text-muted hover:text-primary"}`}>
+                    <span className="material-symbols-outlined text-[18px]">{key.publicShare ? "link" : "link_off"}</span>
                   </button>
                   <button onClick={() => {
                     if (key.isActive !== false) setConfirmState({title: "Pause API Key", message: `Pause API key "${key.name}"? It will stop working immediately.`, onConfirm: () => { setConfirmState(null); handleToggleKey(key.id, false); }});
@@ -1401,6 +1428,16 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
             </p>
           </div>
           <KeyExpirationField value={editKeyExpiration} onChange={(value) => { setEditKeyExpiration(value); setEditKeyError(""); }} error={editKeyError} />
+          <div className="rounded-xl border border-border-subtle p-3">
+            <p className="mb-2 text-xs font-medium text-text-main">Public status page</p>
+            <KeyPublicShare
+              apiKey={editingKey}
+              onChange={(publicShare) => {
+                handleTogglePublicShare(editingKey.id, publicShare);
+                setEditingKey({ ...editingKey, publicShare });
+              }}
+            />
+          </div>
           <div className="flex gap-2">
             <Button onClick={handleUpdateKeyTokens} fullWidth disabled={savingEdit}>
               {savingEdit ? "Saving..." : "Save Changes"}

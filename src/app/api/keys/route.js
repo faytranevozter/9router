@@ -21,7 +21,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, tokenLimit, access, expiresAt } = body;
+    const { name, tokenLimit, access, expiresAt, publicShare } = body;
     const expiration = validateKeyExpiration(expiresAt === undefined ? null : expiresAt);
     if (!expiration.ok) return NextResponse.json({ error: expiration.error }, { status: 400 });
 
@@ -36,12 +36,18 @@ export async function POST(request) {
       accessValue = checked.value;
     }
 
+    // publicShare is a boolean toggle; reject anything else rather than coercing.
+    if (publicShare !== undefined && typeof publicShare !== "boolean") {
+      return NextResponse.json({ error: "publicShare must be a boolean" }, { status: 400 });
+    }
+
     // Always get machineId from server
     const machineId = await getConsistentMachineId();
     const apiKey = await createApiKey(name, machineId, {
       tokenLimit,
       access: accessValue,
       expiresAt: expiration.value,
+      publicShare: publicShare === true,
     });
 
     return NextResponse.json({
@@ -53,6 +59,7 @@ export async function POST(request) {
       usedTokens: apiKey.usedTokens,
       createdAt: apiKey.createdAt,
       expiresAt: apiKey.expiresAt,
+      publicShare: apiKey.publicShare,
     }, { status: 201 });
   } catch (error) {
     console.log("Error creating key:", error);

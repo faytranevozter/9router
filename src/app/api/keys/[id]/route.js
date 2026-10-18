@@ -23,7 +23,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, isActive, access, tokenLimit, usedTokens, expiresAt } = body;
+    const { name, isActive, access, tokenLimit, usedTokens, expiresAt, publicShare } = body;
 
     const existing = await getApiKeyById(id);
     if (!existing) {
@@ -45,6 +45,13 @@ export async function PUT(request, { params }) {
     }
     if (tokenLimit !== undefined) updateData.tokenLimit = tokenLimit;
     if (usedTokens !== undefined) updateData.usedTokens = usedTokens;
+    // Omitted preserves the current value, like expiresAt.
+    if (publicShare !== undefined) {
+      if (typeof publicShare !== "boolean") {
+        return NextResponse.json({ error: "publicShare must be a boolean" }, { status: 400 });
+      }
+      updateData.publicShare = publicShare;
+    }
 
     const updated = await updateApiKey(id, updateData);
 

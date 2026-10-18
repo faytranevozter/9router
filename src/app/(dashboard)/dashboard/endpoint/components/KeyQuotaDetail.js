@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from "react";
 import PropTypes from "prop-types";
 import { Modal, Button } from "@/shared/components";
 import { cn } from "@/shared/utils/cn";
+import { fmtTokens, fmtCost, fmtDate } from "@/shared/utils/formatTokens";
 
 const PERIODS = [
   { value: "today", label: "Today" },
@@ -18,26 +19,8 @@ const PERIODS = [
   { value: "all", label: "All" },
 ];
 
-export const fmtTokens = (n) => {
-  const num = Number(n) || 0;
-  if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`;
-  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
-  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-  return String(num);
-};
-
-const fmtCost = (n) => `$${(Number(n) || 0).toFixed(4)}`;
-
-const fmtDate = (iso) => {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-};
+// Re-exported: other dashboard views import fmtTokens from here.
+export { fmtTokens };
 
 // Relative "Xs ago" — the parent re-renders on each SSE tick, so this stays fresh
 // without its own interval.
