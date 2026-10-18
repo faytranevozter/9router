@@ -21,7 +21,10 @@ import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 import KeyAccessControls from "./components/KeyAccessControls";
 import KeyQuotaDetail from "./components/KeyQuotaDetail";
-export default function APIPageClient({ machineId }) {
+// Each route mounts only its own view; sharing the existing management controls
+// keeps quota/access actions identical while separating endpoint configuration.
+export default function APIPageClient({ machineId, view = "endpoint" }) {
+  const managingKeys = view === "keys";
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -38,6 +41,8 @@ export default function APIPageClient({ machineId }) {
 
   // Detailed per-key quota view.
   const [detailKey, setDetailKey] = useState(null);
+  const [accessKeyId, setAccessKeyId] = useState(null);
+  const accessKey = keys.find((key) => key.id === accessKeyId);
 
   const [requireApiKey, setRequireApiKey] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
@@ -110,11 +115,6 @@ export default function APIPageClient({ machineId }) {
   useEffect(() => {
     if (tsLogRef.current) tsLogRef.current.scrollTop = tsLogRef.current.scrollHeight;
   }, [tsInstallLog]);
-
-  useEffect(() => {
-    fetchData();
-    loadSettings();
-  }, []);
 
   // Status poll: only while degraded (not yet reachable). Stop once healthy to avoid spam.
   // Visibility re-check: refresh once when tab becomes visible.
@@ -286,6 +286,19 @@ export default function APIPageClient({ machineId }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (managingKeys) fetchData();
+      else {
+        loadSettings();
+        setLoading(false);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+    // Route view is fixed for the lifetime of this mounted page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [managingKeys]);
 
   // u2500u2500u2500 Cloudflare Tunnel handlers
   // Ping tunnel health until reachable. Race multiple URLs (shortlink + direct) — 1 OK is enough.
@@ -785,7 +798,7 @@ export default function APIPageClient({ machineId }) {
 
   const maskKey = (fullKey) => {
     if (!fullKey || fullKey.length <= 10) return fullKey || "";
-    return fullKey.slice(0, 6) + "•".repeat(fullKey.length - 10) + fullKey.slice(-4);
+    return fullKey.slice(0, 6) + "••••••" + fullKey.slice(-4);
   };
 
   const toggleKeyVisibility = (keyId) => {
@@ -819,6 +832,7 @@ export default function APIPageClient({ machineId }) {
 
   return (
     <div className="flex flex-col gap-8">
+      {!managingKeys && <>
       {/* Endpoint Card */}
       <Card>
         <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -1064,36 +1078,50 @@ export default function APIPageClient({ machineId }) {
         )}
       </Card>
 
-      {/* API Keys */}
       <Card id="require-api-key">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary">vpn_key</span>
-            API Keys
-          </h2>
-          <Button icon="add" onClick={() => setShowAddModal(true)}>
-            Create Key
-          </Button>
-        </div>
-
-        <div className="flex items-center justify-between pb-4 mb-4 border-b border-border">
-          <div>
-            <p className="font-medium">Require API key</p>
-            <p className="text-sm text-text-muted">
-              Requests without a valid key will be rejected
-            </p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Toggle
+              checked={requireApiKey}
+              onChange={() => handleRequireApiKey(!requireApiKey)}
+              title="Require API key"
+            />
+            <div>
+              <p className="font-medium">Require API key</p>
+              <p className="text-sm text-text-muted">Requests without a valid key will be rejected</p>
+            </div>
           </div>
-          <Toggle
-            checked={requireApiKey}
-            onChange={() => handleRequireApiKey(!requireApiKey)}
-          />
+          <Link
+            href="/dashboard/keys"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-[10px] border border-border px-4 py-2 text-sm font-semibold text-text-main hover:bg-surface-2"
+          >
+            Manage API keys
+            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+          </Link>
         </div>
-
         {isRemoteHost && !requireApiKey && (
-          <div className="mb-4 -mt-2">
+          <div className="mt-4">
             <SecurityWarning message="Endpoint is exposed without an API key." />
           </div>
         )}
+      </Card>
+      </>}
+
+      {managingKeys && <>
+      {/* API Keys */}
+      <Card id="require-api-key">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div>
+            <h2 className="text-base font-semibold text-text-main">Your API keys <span className="ml-1 text-sm font-normal text-text-muted">{keys.length}</span></h2>
+            <p className="mt-1 text-xs text-text-muted">{keys.filter((key) => key.isActive !== false).length} active · Manage access and lifetime token limits</p>
+          </div>
+          <div className="flex items-center gap-3">
+          <Link href="/dashboard/usage/by-key?period=7d" className="text-xs font-medium text-text-muted hover:text-primary">View all usage</Link>
+          <Button size="sm" icon="add" onClick={() => setShowAddModal(true)}>
+            Create Key
+          </Button>
+          </div>
+        </div>
 
         {keys.length === 0 ? (
           <div className="text-center py-12">
@@ -1107,16 +1135,25 @@ export default function APIPageClient({ machineId }) {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col">
+          <div className="overflow-x-auto">
+             <table className="w-full min-w-[820px] text-left text-sm">
+              <thead className="border-b border-border bg-surface-2/50 text-xs text-text-muted">
+                <tr>
+                  {["Key", "Status", "Token usage", "Access", "Actions"].map((label) => (
+                    <th key={label} scope="col" className="px-3 py-3 font-medium whitespace-nowrap">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
             {keys.map((key) => (
-              <div
+              <tr
                 key={key.id}
-                className={`group flex items-start justify-between gap-3 py-3 border-b border-black/[0.03] dark:border-white/[0.03] last:border-b-0 ${key.isActive === false ? "opacity-60" : ""}`}
+                className="group align-middle hover:bg-surface-2/30 transition-colors"
               >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{key.name}</p>
-                  <div className="flex items-center gap-2 mt-1 min-w-0 flex-wrap">
-                    <code className="text-xs text-text-muted font-mono break-all min-w-0">
+                <td className="px-3 py-4">
+                  <p className="font-semibold text-text-main whitespace-nowrap">{key.name}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <code className="text-xs text-text-muted font-mono whitespace-nowrap">
                       {visibleKeys.has(key.id) ? key.key : maskKey(key.key)}
                     </code>
                     <div className="flex items-center gap-1 shrink-0">
@@ -1131,6 +1168,7 @@ export default function APIPageClient({ machineId }) {
                       </button>
                       <button
                         onClick={() => copy(key.key, key.id)}
+                        title="Copy API key"
                         className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-all"
                       >
                         <span className="material-symbols-outlined text-[14px]">
@@ -1139,23 +1177,23 @@ export default function APIPageClient({ machineId }) {
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-text-muted mt-1">
-                    Created {new Date(key.createdAt).toLocaleDateString()}
-                  </p>
-                  {key.isActive === false && (
-                    <p className="text-xs text-orange-500 mt-1">Paused</p>
-                  )}
-
+                  <p className="mt-1 text-[11px] text-text-muted">Created {new Date(key.createdAt).toLocaleDateString()}</p>
+                </td>
+                <td className="px-3 py-4 whitespace-nowrap">
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${key.isActive === false ? "bg-orange-500/10 text-orange-500" : "bg-green-500/10 text-green-600 dark:text-green-400"}`}>
+                    {key.isActive === false ? "Paused" : "Active"}
+                  </span>
+                </td>
+                <td className="px-3 py-4 min-w-48">
                   {/* Token quota usage */}
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-text-muted">
                     <div className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[13px] text-text-muted">toll</span>
                       <span>
-                        Tokens: <strong className="text-text-main font-medium">{formatTokens(key.usedTokens || 0)}</strong>
+                        <strong className="text-text-main font-semibold tabular-nums">{formatTokens(key.usedTokens || 0)}</strong>
                         {key.tokenLimit > 0 ? (
-                          <> / {formatTokens(key.tokenLimit)} ({Math.min(100, Math.round(((key.usedTokens || 0) / key.tokenLimit) * 100))}%)</>
+                          <> / {formatTokens(key.tokenLimit)} tokens</>
                         ) : (
-                          <span className="text-text-muted font-normal"> (Unlimited)</span>
+                          <span className="text-text-muted font-normal"> tokens used</span>
                         )}
                       </span>
                     </div>
@@ -1165,6 +1203,7 @@ export default function APIPageClient({ machineId }) {
                       </span>
                     )}
                   </div>
+                  <p className="mt-1 text-[11px] text-text-muted">{key.tokenLimit > 0 ? `${Math.min(100, Math.round(((key.usedTokens || 0) / key.tokenLimit) * 100))}% of lifetime limit` : "No token limit"}</p>
                   {key.tokenLimit > 0 && (
                     <div className="w-full max-w-xs mt-1.5 h-1.5 bg-black/5 dark:bg-white/5 rounded-full overflow-hidden">
                       <div
@@ -1180,72 +1219,68 @@ export default function APIPageClient({ machineId }) {
                     </div>
                   )}
 
-                  <KeyAccessControls
-                    apiKey={key}
-                    onChange={(access) => handleUpdateKeyAccess(key.id, access)}
-                    onRequestRestrict={() => setConfirmState({
-                      title: "Restrict API Key",
-                      message: `Restrict API key "${key.name}"?\n\nIt will only be able to call the combos and models you add. Until you add one, it can call nothing.`,
-                      onConfirm: async () => {
-                        setConfirmState(null);
-                        handleUpdateKeyAccess(key.id, { restricted: true, allow: key.access?.allow || [] });
-                      }
-                    })}
-                  />
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                </td>
+                <td className="px-3 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setAccessKeyId(key.id)}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 -ml-2 text-left hover:bg-surface-2 transition-colors"
+                    title={`Manage access for ${key.name}`}
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-text-muted">{key.access?.restricted ? "lock" : "public"}</span>
+                    <span className="whitespace-nowrap">
+                      <span className="block text-xs font-medium">{key.access?.restricted ? (key.access.allow?.length ? "Restricted" : "No access") : "Unrestricted"}</span>
+                      <span className="block mt-0.5 text-[11px] text-text-muted">{key.access?.restricted ? `${key.access.allow?.length || 0} allowed entries` : "All models and combos"}</span>
+                    </span>
+                    <span className="material-symbols-outlined text-[16px] text-text-muted">chevron_right</span>
+                  </button>
+                </td>
+                <td className="px-3 py-4">
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => setDetailKey(key)}
-                    className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
+                    className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
                     title="View detailed quota usage"
                   >
-                    <span className="material-symbols-outlined text-[18px]">bar_chart</span>
+                    <span className="material-symbols-outlined text-[16px]">bar_chart</span>
+                    Usage
                   </button>
-                  <Link
-                    href={`/dashboard/usage/by-key?key=${key.id}&period=7d`}
-                    className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
-                    title="Open in API Key Usage"
-                  >
+                  <Link href={`/dashboard/usage/by-key?key=${key.id}&period=7d`} title="Open in API Key Usage" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
                     <span className="material-symbols-outlined text-[18px]">open_in_new</span>
                   </Link>
-                  <button
-                    onClick={() => handleOpenEditModal(key)}
-                    className="p-1.5 hover:bg-primary/10 rounded text-text-muted hover:text-primary transition-all"
-                    title="Edit token quota"
-                  >
+                  <button onClick={() => handleOpenEditModal(key)} title="Edit token quota" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
                     <span className="material-symbols-outlined text-[18px]">edit</span>
                   </button>
-                  <Toggle
-                    size="sm"
-                    checked={key.isActive ?? true}
-                    onChange={(checked) => {
-                      if (key.isActive && !checked) {
-                        setConfirmState({
-                          title: "Pause API Key",
-                          message: `Pause API key "${key.name}"?\n\nThis key will stop working immediately but can be resumed later.`,
-                          onConfirm: async () => {
-                            setConfirmState(null);
-                            handleToggleKey(key.id, checked);
-                          }
-                        });
-                      } else {
-                        handleToggleKey(key.id, checked);
-                      }
-                    }}
-                    title={key.isActive ? "Pause key" : "Resume key"}
-                  />
-                  <button
-                    onClick={() => handleDeleteKey(key.id)}
-                    className="p-2 hover:bg-red-500/10 rounded text-red-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all"
-                  >
+                  <button onClick={() => {
+                    if (key.isActive !== false) setConfirmState({title: "Pause API Key", message: `Pause API key "${key.name}"? It will stop working immediately.`, onConfirm: () => { setConfirmState(null); handleToggleKey(key.id, false); }});
+                    else handleToggleKey(key.id, true);
+                  }} title={key.isActive === false ? "Resume key" : "Pause key"} className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
+                    <span className="material-symbols-outlined text-[18px]">{key.isActive === false ? "play_arrow" : "pause"}</span>
+                  </button>
+                  <button onClick={() => handleDeleteKey(key.id)} title="Delete API key" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-red-500/10 hover:text-red-500">
                     <span className="material-symbols-outlined text-[18px]">delete</span>
                   </button>
                 </div>
-              </div>
+                </td>
+              </tr>
             ))}
+              </tbody>
+            </table>
           </div>
         )}
       </Card>
+
+      <Modal isOpen={!!accessKey} title={`Access — ${accessKey?.name || ""}`} onClose={() => setAccessKeyId(null)} footer={<Button variant="ghost" fullWidth onClick={() => setAccessKeyId(null)}>Done</Button>}>
+        {accessKey && <KeyAccessControls
+          apiKey={accessKey}
+          onChange={(access) => handleUpdateKeyAccess(accessKey.id, access)}
+          onRequestRestrict={() => setConfirmState({
+            title: "Restrict API Key",
+            message: `Restrict API key "${accessKey.name}"? It will only be able to call the combos and models you add.`,
+            onConfirm: () => { setConfirmState(null); handleUpdateKeyAccess(accessKey.id, { restricted: true, allow: accessKey.access?.allow || [] }); }
+          })}
+        />}
+      </Modal>
 
       {/* Add Key Modal */}
       <Modal
@@ -1390,6 +1425,9 @@ export default function APIPageClient({ machineId }) {
         </div>
       </Modal>
 
+      </>}
+
+      {!managingKeys && <>
       {/* Enable Tunnel Modal */}
       <Modal
         isOpen={showEnableTunnelModal}
@@ -1536,6 +1574,8 @@ export default function APIPageClient({ machineId }) {
         </div>
       </Modal>
 
+      </>}
+
       {/* Confirm Modal */}
       <ConfirmModal
         isOpen={!!confirmState}
@@ -1552,4 +1592,5 @@ export default function APIPageClient({ machineId }) {
 
 APIPageClient.propTypes = {
   machineId: PropTypes.string.isRequired,
+  view: PropTypes.oneOf(["endpoint", "keys"]),
 };

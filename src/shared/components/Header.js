@@ -84,6 +84,13 @@ const getPageInfo = (pathname) => {
       icon: "layers",
       breadcrumbs: [],
     };
+  if (pathname === "/dashboard/keys")
+    return {
+      title: "API Keys",
+      description: "Manage API keys, access restrictions, and token quotas",
+      icon: "vpn_key",
+      breadcrumbs: [],
+    };
   if (pathname.includes("/usage/by-key"))
     return {
       title: "API Key Usage",
