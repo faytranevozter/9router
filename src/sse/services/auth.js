@@ -1,4 +1,5 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
+import { isKeyExpired } from "@/shared/utils/keyExpiration.js";
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
@@ -393,6 +394,9 @@ export async function checkApiKeyQuota(apiKey, requireApiKey) {
   }
   if (!keyRecord.isActive) {
     return unauthorized("API key is paused");
+  }
+  if (isKeyExpired(keyRecord.expiresAt)) {
+    return unauthorized("API key has expired");
   }
   if (keyRecord.tokenLimit > 0 && keyRecord.usedTokens >= keyRecord.tokenLimit) {
     return {

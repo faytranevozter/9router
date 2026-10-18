@@ -17,18 +17,20 @@
  */
 
 import { getApiKeys } from "@/lib/db";
+import { isKeyUsable } from "@/shared/utils/keyExpiration.js";
 
 /**
  * @param {string|null|undefined} callerKey  Key sent by the frontend.
  * @returns {Promise<string>}
  */
 export async function resolveCliApiKey(callerKey) {
-  if (callerKey && callerKey.trim() && callerKey.trim() !== "sk_9router") {
-    return callerKey.trim();
-  }
   try {
     const keys = await getApiKeys();
-    const active = keys.find((k) => k.isActive);
+    if (callerKey && callerKey.trim() && callerKey.trim() !== "sk_9router") {
+      const supplied = keys.find((k) => k.key === callerKey.trim());
+      if (!supplied || isKeyUsable(supplied)) return callerKey.trim();
+    }
+    const active = keys.find((key) => isKeyUsable(key));
     return active?.key || "";
   } catch {
     return "";

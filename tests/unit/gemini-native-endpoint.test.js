@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   handleChat: vi.fn(),
   getSettings: vi.fn(),
-  isValidApiKey: vi.fn(),
+  checkApiKeyQuota: vi.fn(),
   getProviderCredentials: vi.fn(),
   markAccountUnavailable: vi.fn(),
   clearAccountError: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock("@/sse/handlers/chat.js", () => ({
 
 vi.mock("@/sse/services/auth.js", () => ({
   getProviderCredentials: mocks.getProviderCredentials,
-  isValidApiKey: mocks.isValidApiKey,
+  checkApiKeyQuota: mocks.checkApiKeyQuota,
   markAccountUnavailable: mocks.markAccountUnavailable,
   clearAccountError: mocks.clearAccountError,
 }));
@@ -60,7 +60,7 @@ describe("Gemini native v1beta endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSettings.mockResolvedValue({ requireApiKey: true });
-    mocks.isValidApiKey.mockResolvedValue(true);
+    mocks.checkApiKeyQuota.mockResolvedValue(null);
     mocks.getProviderCredentials.mockResolvedValue({
       apiKey: "real-gemini-key",
       connectionId: "gemini-conn",
@@ -77,6 +77,18 @@ describe("Gemini native v1beta endpoint", () => {
     mocks.handleChat.mockResolvedValue(
       Response.json({ candidates: [{ content: { parts: [{ text: "chat" }] } }] })
     );
+  });
+
+  it("rejects an expired key in optional-key mode before contacting a provider", async () => {
+    mocks.getSettings.mockResolvedValue({ requireApiKey: false });
+    mocks.checkApiKeyQuota.mockResolvedValue({ error: "API key has expired", status: 401 });
+    const response = await POST(makeGeminiRequest("gemini-3.1-flash-tts-preview:generateContent", audioBody()), {
+      params: Promise.resolve({ path: ["gemini-3.1-flash-tts-preview:generateContent"] }),
+    });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: { message: "API key has expired" } });
+    expect(mocks.getProviderCredentials).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("lists Gemini TTS models using standard Google model names", async () => {
@@ -122,7 +134,7 @@ describe("Gemini native v1beta endpoint", () => {
       params: Promise.resolve({ path: ["gemini-2.5-flash-preview-tts:generateContent"] }),
     });
 
-    expect(mocks.isValidApiKey).toHaveBeenCalledWith("client-router-key");
+    expect(mocks.checkApiKeyQuota).toHaveBeenCalledWith("client-router-key", true);
     expect(global.fetch.mock.calls[0][1].headers["x-goog-api-key"]).toBe("real-gemini-key");
     expect(global.fetch.mock.calls[0][1].headers["x-goog-api-key"]).not.toBe("client-router-key");
   });

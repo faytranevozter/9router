@@ -2,6 +2,13 @@ import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
 import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
+import { isKeyExpired, validateKeyExpiration } from "@/shared/utils/keyExpiration.js";
+
+function normalizeExpiration(value) {
+  const checked = validateKeyExpiration(value);
+  if (!checked.ok) throw new Error(checked.error);
+  return checked.value;
+}
 
 function rowToKey(row) {
   if (!row) return null;
@@ -15,6 +22,7 @@ function rowToKey(row) {
     usedTokens: row.usedTokens != null ? Number(row.usedTokens) : 0,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt || null,
+    expiresAt: row.expiresAt ?? null,
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
 }
@@ -55,13 +63,14 @@ export async function createApiKey(name, machineId, options = {}) {
     isActive: true,
     tokenLimit,
     usedTokens: 0,
+    expiresAt: options.expiresAt === undefined ? null : normalizeExpiration(options.expiresAt),
     createdAt: now,
     updatedAt: now,
     access,
   };
   const cols = keyAccessToColumns(access);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, createdAt, updatedAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, tokenLimit, usedTokens, createdAt, updatedAt, accessRestricted, accessAllow, expiresAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -74,12 +83,14 @@ export async function createApiKey(name, machineId, options = {}) {
       apiKey.updatedAt,
       cols.accessRestricted,
       cols.accessAllow,
+      apiKey.expiresAt,
     ]
   );
   return apiKey;
 }
 
 export async function updateApiKey(id, data) {
+  const expiration = data.expiresAt === undefined ? undefined : normalizeExpiration(data.expiresAt);
   const db = await getAdapter();
   let result = null;
   db.transaction(() => {
@@ -87,11 +98,12 @@ export async function updateApiKey(id, data) {
     if (!row) return;
     const current = rowToKey(row);
     const merged = { ...current, ...data, updatedAt: new Date().toISOString() };
+    merged.expiresAt = expiration === undefined ? current.expiresAt : expiration;
     const tokenLimit = merged.tokenLimit != null ? Math.max(0, Number(merged.tokenLimit) || 0) : 0;
     const usedTokens = merged.usedTokens != null ? Math.max(0, Number(merged.usedTokens) || 0) : 0;
     const cols = keyAccessToColumns(merged.access || KEY_ACCESS_UNRESTRICTED);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ?, expiresAt = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -102,6 +114,7 @@ export async function updateApiKey(id, data) {
         merged.updatedAt,
         cols.accessRestricted,
         cols.accessAllow,
+        merged.expiresAt,
         id,
       ]
     );
@@ -124,7 +137,7 @@ export async function deleteApiKey(id) {
 
 export async function validateApiKey(key) {
   const db = await getAdapter();
-  const row = db.get(`SELECT isActive FROM apiKeys WHERE key = ?`, [key]);
+  const row = db.get(`SELECT isActive, expiresAt FROM apiKeys WHERE key = ?`, [key]);
   if (!row) return false;
-  return row.isActive === 1 || row.isActive === true;
+  return (row.isActive === 1 || row.isActive === true) && !isKeyExpired(row.expiresAt);
 }

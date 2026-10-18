@@ -21,11 +21,19 @@ import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
 import KeyAccessControls from "./components/KeyAccessControls";
 import KeyQuotaDetail from "./components/KeyQuotaDetail";
+import KeyExpirationField from "./components/KeyExpirationField";
+import { expirationToLocalInput, localInputToExpiration, isKeyExpired } from "@/shared/utils/keyExpiration";
+import { useKeyExpirationClock } from "@/shared/hooks/useKeyExpirationClock";
 // Each route mounts only its own view; sharing the existing management controls
 // keeps quota/access actions identical while separating endpoint configuration.
 export default function APIPageClient({ machineId, view = "endpoint" }) {
   const managingKeys = view === "keys";
   const [keys, setKeys] = useState([]);
+  const keyClock = useKeyExpirationClock(keys);
+  const [newKeyExpiration, setNewKeyExpiration] = useState(null);
+  const [newKeyError, setNewKeyError] = useState("");
+  const [editKeyExpiration, setEditKeyExpiration] = useState(null);
+  const [editKeyError, setEditKeyError] = useState("");
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
@@ -649,13 +657,16 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
 
   const handleCreateKey = async () => {
     if (!newKeyName.trim()) return;
+    setNewKeyError("");
+    const expiration = newKeyExpiration === null ? { ok: true, value: null } : localInputToExpiration(newKeyExpiration);
+    if (!expiration.ok) { setNewKeyError(expiration.error); return; }
 
     try {
       const tokenLimit = newKeyTokenLimit ? Math.max(0, parseInt(newKeyTokenLimit, 10) || 0) : 0;
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newKeyName.trim(), tokenLimit }),
+        body: JSON.stringify({ name: newKeyName.trim(), tokenLimit, expiresAt: expiration.value }),
       });
       const data = await res.json();
 
@@ -664,10 +675,12 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
         await fetchData();
         setNewKeyName("");
         setNewKeyTokenLimit("");
+        setNewKeyExpiration(null);
         setShowAddModal(false);
-      }
+      } else setNewKeyError(data.error || "Failed to create key");
     } catch (error) {
       console.log("Error creating key:", error);
+      setNewKeyError("Failed to create key. Please try again.");
     }
   };
 
@@ -675,17 +688,24 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
     setEditingKey(key);
     setEditKeyTokenLimit(key.tokenLimit ? String(key.tokenLimit) : "");
     setEditKeyUsedTokens(key.usedTokens || 0);
+    setEditKeyExpiration(key.expiresAt == null ? null : expirationToLocalInput(key.expiresAt));
+    setEditKeyError("");
   };
 
   const handleUpdateKeyTokens = async () => {
     if (!editingKey) return;
+    setEditKeyError("");
+    const originalExpiration = editingKey.expiresAt == null ? null : expirationToLocalInput(editingKey.expiresAt);
+    const expirationChanged = editKeyExpiration !== originalExpiration;
+    const expiration = editKeyExpiration === null ? { ok: true, value: null } : localInputToExpiration(editKeyExpiration);
+    if (expirationChanged && !expiration.ok) { setEditKeyError(expiration.error); return; }
     setSavingEdit(true);
     try {
       const tokenLimit = editKeyTokenLimit ? Math.max(0, parseInt(editKeyTokenLimit, 10) || 0) : 0;
       const res = await fetch(`/api/keys/${editingKey.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tokenLimit, usedTokens: editKeyUsedTokens }),
+        body: JSON.stringify({ tokenLimit, usedTokens: editKeyUsedTokens, ...(expirationChanged ? { expiresAt: expiration.value } : {}) }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -693,9 +713,13 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
           setKeys(prev => prev.map(k => k.id === editingKey.id ? { ...k, ...data.key } : k));
         }
         setEditingKey(null);
+      } else {
+        const data = await res.json();
+        setEditKeyError(data.error || "Failed to update key");
       }
     } catch (error) {
       console.log("Error updating key tokens:", error);
+      setEditKeyError("Failed to update key. Please try again.");
     } finally {
       setSavingEdit(false);
     }
@@ -716,7 +740,7 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
   const handleResetKeyUsage = (key) => {
     setConfirmState({
       title: "Reset Token Usage",
-      message: `Reset the used tokens counter for "${key.name}" to 0?\n\nThe key becomes usable again immediately (its limit is unchanged).`,
+      message: `Reset the used tokens counter for "${key.name}" to 0?\n\nIts limit, pause state, and expiration are unchanged.`,
       onConfirm: async () => {
         setConfirmState(null);
         try {
@@ -1113,7 +1137,7 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
           <div>
             <h2 className="text-base font-semibold text-text-main">Your API keys <span className="ml-1 text-sm font-normal text-text-muted">{keys.length}</span></h2>
-            <p className="mt-1 text-xs text-text-muted">{keys.filter((key) => key.isActive !== false).length} active · Manage access and lifetime token limits</p>
+            <p className="mt-1 text-xs text-text-muted">{keys.filter((key) => key.isActive !== false && !isKeyExpired(key.expiresAt, keyClock)).length} active · Manage access, expiration, and lifetime token limits</p>
           </div>
           <div className="flex items-center gap-3">
           <Link href="/dashboard/usage/by-key?period=7d" className="text-xs font-medium text-text-muted hover:text-primary">View all usage</Link>
@@ -1180,9 +1204,13 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
                   <p className="mt-1 text-[11px] text-text-muted">Created {new Date(key.createdAt).toLocaleDateString()}</p>
                 </td>
                 <td className="px-3 py-4 whitespace-nowrap">
-                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${key.isActive === false ? "bg-orange-500/10 text-orange-500" : "bg-green-500/10 text-green-600 dark:text-green-400"}`}>
-                    {key.isActive === false ? "Paused" : "Active"}
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${isKeyExpired(key.expiresAt, keyClock) ? "bg-red-500/10 text-red-500" : key.isActive === false ? "bg-orange-500/10 text-orange-500" : "bg-green-500/10 text-green-600 dark:text-green-400"}`}>
+                    {isKeyExpired(key.expiresAt, keyClock) ? "Expired" : key.isActive === false ? "Paused" : "Active"}
                   </span>
+                  {isKeyExpired(key.expiresAt, keyClock) && key.isActive === false && <span className="ml-1 text-xs text-text-muted">Paused</span>}
+                  <p className={`mt-2 text-[11px] ${isKeyExpired(key.expiresAt, keyClock) ? "text-red-500" : "text-text-muted"}`}>
+                    {key.expiresAt == null ? "Never expires" : Number.isFinite(Date.parse(key.expiresAt)) ? `Expires ${new Date(key.expiresAt).toLocaleString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})` : "Invalid expiration"}
+                  </p>
                 </td>
                 <td className="px-3 py-4 min-w-48">
                   {/* Token quota usage */}
@@ -1248,7 +1276,7 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
                   <Link href={`/dashboard/usage/by-key?key=${key.id}&period=7d`} title="Open in API Key Usage" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
                     <span className="material-symbols-outlined text-[18px]">open_in_new</span>
                   </Link>
-                  <button onClick={() => handleOpenEditModal(key)} title="Edit token quota" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
+                  <button onClick={() => handleOpenEditModal(key)} title="Edit quota and expiration" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
                     <span className="material-symbols-outlined text-[18px]">edit</span>
                   </button>
                   <button onClick={() => {
@@ -1290,6 +1318,8 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
           setShowAddModal(false);
           setNewKeyName("");
           setNewKeyTokenLimit("");
+          setNewKeyExpiration(null);
+          setNewKeyError("");
         }}
       >
         <div className="flex flex-col gap-4">
@@ -1312,6 +1342,7 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
               Maximum total tokens this key can consume. Once reached, requests will return 429.
             </p>
           </div>
+          <KeyExpirationField value={newKeyExpiration} onChange={(value) => { setNewKeyExpiration(value); setNewKeyError(""); }} error={newKeyError} />
           <div className="flex gap-2">
             <Button onClick={handleCreateKey} fullWidth disabled={!newKeyName.trim()}>
               Create
@@ -1321,6 +1352,8 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
                 setShowAddModal(false);
                 setNewKeyName("");
                 setNewKeyTokenLimit("");
+                setNewKeyExpiration(null);
+                setNewKeyError("");
               }}
               variant="ghost"
               fullWidth
@@ -1367,6 +1400,7 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
               Maximum total tokens this key can consume. Once reached, requests will return 429.
             </p>
           </div>
+          <KeyExpirationField value={editKeyExpiration} onChange={(value) => { setEditKeyExpiration(value); setEditKeyError(""); }} error={editKeyError} />
           <div className="flex gap-2">
             <Button onClick={handleUpdateKeyTokens} fullWidth disabled={savingEdit}>
               {savingEdit ? "Saving..." : "Save Changes"}

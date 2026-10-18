@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { CardSkeleton } from "@/shared/components";
 import { CLI_TOOLS } from "@/shared/constants/cliTools";
+import { isKeyUsable } from "@/shared/utils/keyExpiration";
+import { useKeyExpirationClock } from "@/shared/hooks/useKeyExpirationClock";
 import { getModelsByProviderId, PROVIDER_ID_TO_ALIAS } from "@/shared/constants/models";
 import {
   ClaudeToolCard, CodexToolCard, DroidToolCard, OpenClawToolCard,
@@ -24,7 +26,9 @@ export default function ToolDetailClient({ toolId, machineId }) {
   const [tunnelPublicUrl, setTunnelPublicUrl] = useState("");
   const [tailscaleEnabled, setTailscaleEnabled] = useState(false);
   const [tailscaleUrl, setTailscaleUrl] = useState("");
-  const [apiKeys, setApiKeys] = useState([]);
+  const [allApiKeys, setApiKeys] = useState([]);
+  const keyClock = useKeyExpirationClock(allApiKeys);
+  const apiKeys = allApiKeys.filter((key) => isKeyUsable(key, keyClock));
 
   useEffect(() => {
     let mounted = true;

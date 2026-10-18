@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteApiKey, getApiKeyById, updateApiKey } from "@/lib/localDb";
 import { validateKeyAccessInput } from "@/shared/utils/keyAccess.js";
+import { validateKeyExpiration } from "@/shared/utils/keyExpiration.js";
 
 // GET /api/keys/[id] - Get single key
 export async function GET(request, { params }) {
@@ -22,7 +23,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, isActive, access, tokenLimit, usedTokens } = body;
+    const { name, isActive, access, tokenLimit, usedTokens, expiresAt } = body;
 
     const existing = await getApiKeyById(id);
     if (!existing) {
@@ -30,6 +31,11 @@ export async function PUT(request, { params }) {
     }
 
     const updateData = {};
+    if (expiresAt !== undefined) {
+      const expiration = validateKeyExpiration(expiresAt);
+      if (!expiration.ok) return NextResponse.json({ error: expiration.error }, { status: 400 });
+      updateData.expiresAt = expiration.value;
+    }
     if (name !== undefined) updateData.name = name;
     if (isActive !== undefined) updateData.isActive = isActive;
     if (access !== undefined) {

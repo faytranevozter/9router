@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   })),
   getSettings: vi.fn(),
   validateApiKey: vi.fn(),
+  getApiKeyByKey: vi.fn(),
   getConsistentMachineId: vi.fn(),
   verifyDashboardAuthToken: vi.fn(),
 }));
@@ -23,6 +24,7 @@ vi.mock("next/server", () => ({
 vi.mock("@/lib/localDb", () => ({
   getSettings: mocks.getSettings,
   validateApiKey: mocks.validateApiKey,
+  getApiKeyByKey: mocks.getApiKeyByKey,
 }));
 
 vi.mock("@/shared/utils/machineId", () => ({
@@ -59,6 +61,7 @@ describe("dashboard guard public LLM API access", () => {
     process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
     mocks.getSettings.mockResolvedValue({ requireLogin: true });
     mocks.validateApiKey.mockResolvedValue(false);
+    mocks.getApiKeyByKey.mockResolvedValue(null);
     mocks.getConsistentMachineId.mockResolvedValue("cli-token");
     mocks.verifyDashboardAuthToken.mockResolvedValue(false);
   });
@@ -68,6 +71,13 @@ describe("dashboard guard public LLM API access", () => {
 
     expect(response).toBe(mocks.nextResponse);
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("rejects known expired keys on loopback model-list routes before bypass", async () => {
+    mocks.getApiKeyByKey.mockResolvedValue({ isActive: true, expiresAt: "2000-01-01T00:00:00Z" });
+    const response = await proxy(localRequest("/v1/models", { Authorization: "Bearer expired" }));
+    expect(response.status).toBe(401);
+    expect(response.body.error.message).toBe("API key has expired");
   });
 
   it("rejects remote Host-spoof when real peer IP is non-loopback", async () => {

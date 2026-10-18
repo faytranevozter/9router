@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSettings, validateApiKey } from "@/lib/localDb";
+import { getSettings, validateApiKey, getApiKeyByKey } from "@/lib/localDb";
+import { isKeyExpired } from "@/shared/utils/keyExpiration.js";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
@@ -222,6 +223,15 @@ export async function proxy(request) {
   }
 
   if (isPublicLlmApi(pathname)) {
+    // Some read-only API routes rely solely on this guard. Do not let the
+    // loopback/CLI bypass authorize a known expired key on those routes.
+    const apiKey = extractApiKey(request);
+    if (apiKey) {
+      const record = await getApiKeyByKey(apiKey);
+      if (record && isKeyExpired(record.expiresAt)) {
+        return NextResponse.json({ error: { message: "API key has expired", type: "authentication_error", code: "api_key_expired" } }, { status: 401 });
+      }
+    }
     if (await canAccessPublicLlmApi(request)) return NextResponse.next();
     return NextResponse.json({ error: "API key required for remote API access" }, { status: 401 });
   }

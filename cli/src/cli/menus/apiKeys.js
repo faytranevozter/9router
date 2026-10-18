@@ -6,6 +6,11 @@ const { showMenuWithBack } = require("../utils/menuHelper");
 const { copyToClipboard } = require("../utils/clipboard");
 const { getEndpoint } = require("../utils/endpoint");
 
+function keyStatus(key) {
+  if (key.expiresAt != null && (!Number.isFinite(Date.parse(key.expiresAt)) || Date.parse(key.expiresAt) <= Date.now())) return "Expired";
+  return key.isActive === false ? "Paused" : "Active";
+}
+
 /**
  * Display API keys list with formatted output
  * @param {Array} keys - Array of API key objects
@@ -106,6 +111,8 @@ async function handleViewFullKey(key) {
   console.log(`Key: ${key.key}`);
   console.log(`ID: ${key.id}`);
   console.log(`Created: ${formatDate(key.createdAt)}`);
+  console.log(`Status: ${keyStatus(key)}`);
+  console.log(`Expires: ${key.expiresAt == null ? "Never" : key.expiresAt}`);
   
   if (key.lastUsedAt) {
     console.log(`Last used: ${getRelativeTime(key.lastUsedAt)}`);
@@ -172,7 +179,7 @@ async function showKeyActions(key, port, breadcrumb = []) {
   await showMenuWithBack({
     title: `🔑 ${key.name}`,
     breadcrumb: [...breadcrumb, key.name],
-    headerContent: `Name: ${key.name}\nKey: ${key.key}\nEndpoint: ${endpoint}`,
+    headerContent: `Name: ${key.name}\nKey: ${key.key}\nStatus: ${keyStatus(key)}\nExpires: ${key.expiresAt == null ? "Never" : key.expiresAt}\nEndpoint: ${endpoint}`,
     items: [
       {
         label: "Copy to Clipboard",
@@ -215,7 +222,7 @@ async function showApiKeysMenu(port, breadcrumb = []) {
       }
       return { items: result.data.keys || [] };
     },
-    formatItem: (key) => `${key.name} (${maskKey(key.key)})`,
+    formatItem: (key) => `${key.name} (${maskKey(key.key)}) — ${keyStatus(key)} · Expires: ${key.expiresAt == null ? "Never" : key.expiresAt}`,
     onSelect: async (key) => {
       await showKeyActions(key, port, breadcrumb);
     },

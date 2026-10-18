@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getApiKeys, createApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { validateKeyAccessInput } from "@/shared/utils/keyAccess";
+import { validateKeyExpiration } from "@/shared/utils/keyExpiration";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,9 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, tokenLimit, access } = body;
+    const { name, tokenLimit, access, expiresAt } = body;
+    const expiration = validateKeyExpiration(expiresAt === undefined ? null : expiresAt);
+    if (!expiration.ok) return NextResponse.json({ error: expiration.error }, { status: 400 });
 
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -38,6 +41,7 @@ export async function POST(request) {
     const apiKey = await createApiKey(name, machineId, {
       tokenLimit,
       access: accessValue,
+      expiresAt: expiration.value,
     });
 
     return NextResponse.json({
@@ -48,6 +52,7 @@ export async function POST(request) {
       tokenLimit: apiKey.tokenLimit,
       usedTokens: apiKey.usedTokens,
       createdAt: apiKey.createdAt,
+      expiresAt: apiKey.expiresAt,
     }, { status: 201 });
   } catch (error) {
     console.log("Error creating key:", error);
