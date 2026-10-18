@@ -755,10 +755,15 @@ export async function getApiKeyUsage(key, period = "all") {
     cutoff = periodCutoff(period);
   }
 
-  const cols = `timestamp, provider, model, endpoint, promptTokens, completionTokens, cost, tokens`;
+  // Keep provider IDs from usage history, but resolve custom provider-node IDs
+  // to their friendly names for the quota detail breakdown (the same mapping
+  // used by the Usage dashboard). Built-in provider IDs fall back to their ID.
+  const cols = `uh.timestamp, COALESCE(pn.name, uh.provider) AS provider,
+                uh.model, uh.endpoint, uh.promptTokens, uh.completionTokens,
+                uh.cost, uh.tokens`;
   const rows = cutoff
-    ? db.all(`SELECT ${cols} FROM usageHistory WHERE apiKey = ? AND timestamp >= ? ORDER BY id ASC`, [keyVal, cutoff])
-    : db.all(`SELECT ${cols} FROM usageHistory WHERE apiKey = ? ORDER BY id ASC`, [keyVal]);
+    ? db.all(`SELECT ${cols} FROM usageHistory uh LEFT JOIN providerNodes pn ON pn.id = uh.provider WHERE uh.apiKey = ? AND uh.timestamp >= ? ORDER BY uh.id ASC`, [keyVal, cutoff])
+    : db.all(`SELECT ${cols} FROM usageHistory uh LEFT JOIN providerNodes pn ON pn.id = uh.provider WHERE uh.apiKey = ? ORDER BY uh.id ASC`, [keyVal]);
 
   let requests = 0, promptTokens = 0, completionTokens = 0, cachedTokens = 0, cost = 0;
   let firstUsed = null, lastUsed = null;

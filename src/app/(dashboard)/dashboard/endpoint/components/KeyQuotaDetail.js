@@ -63,7 +63,7 @@ function BreakdownTable({ title, rows, labelKey, empty }) {
         <p className="px-3 py-4 text-xs text-text-muted text-center">{empty}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full min-w-max text-xs">
             <thead>
               <tr className="text-text-muted border-b border-border">
                 <th className="text-left font-medium px-3 py-1.5">{labelKey}</th>
@@ -80,7 +80,7 @@ function BreakdownTable({ title, rows, labelKey, empty }) {
                 const pct = Math.round((tokens / total) * 100);
                 return (
                   <tr key={r[labelKey]} className="border-b border-border/60 last:border-b-0">
-                    <td className="px-3 py-1.5 font-mono text-[11px] text-text-main break-all max-w-[220px]">{r[labelKey]}</td>
+                    <td className="px-3 py-1.5 font-mono text-[11px] text-text-main whitespace-nowrap">{r[labelKey]}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-text-muted">{(r.requests || 0).toLocaleString()}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-text-muted">{fmtTokens(r.promptTokens)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-text-muted">{fmtTokens(r.completionTokens)}</td>
@@ -185,7 +185,13 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
     : "bg-primary";
 
   return (
-    <Modal isOpen title={`Token Quota — ${apiKey.name || ""}`} onClose={onClose} size="full">
+    <Modal
+      isOpen
+      title={`Token Quota — ${apiKey.name || ""}`}
+      onClose={onClose}
+      size="full"
+      footer={<Button onClick={onClose} variant="ghost" fullWidth>Close</Button>}
+    >
       {/* Modal owns the viewport-sized scroll area. Avoid a second max-height
           scroller here: nested scrolling clipped the live panel and made the
           breakdown tables appear cut off in the quota detail view. */}
@@ -246,27 +252,30 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
         </div>
 
         {/* Period selector */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              type="button"
-              onClick={() => setPeriod(p.value)}
-              className={cn(
-                "px-2.5 py-1 rounded-lg text-xs font-medium transition-all cursor-pointer border",
-                period === p.value
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-text-muted hover:text-text-main hover:bg-surface-2"
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {PERIODS.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPeriod(p.value)}
+                className={cn(
+                  "shrink-0 rounded-lg border px-2 py-1 text-xs font-medium transition-all cursor-pointer sm:px-2.5",
+                  period === p.value
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-text-muted hover:text-text-main hover:bg-surface-2"
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={fetchData}
-            className="ml-auto p-1.5 rounded-lg border border-border text-text-muted hover:text-primary hover:border-primary/40 transition-all cursor-pointer"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border p-0 text-text-muted hover:text-primary hover:border-primary/40 transition-all cursor-pointer sm:size-10"
             title="Refresh"
+            aria-label="Refresh usage"
           >
             <span className="material-symbols-outlined text-[16px]">refresh</span>
           </button>
@@ -370,9 +379,6 @@ export default function KeyQuotaDetail({ apiKey, onClose, onResetUsage, initialP
         )}
       </div>
 
-      <div className="flex gap-2 pt-3 mt-1 border-t border-border">
-        <Button onClick={onClose} variant="ghost" fullWidth>Close</Button>
-      </div>
     </Modal>
   );
 }
