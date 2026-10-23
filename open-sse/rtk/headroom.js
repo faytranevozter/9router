@@ -1,6 +1,10 @@
 import { FORMATS } from "../translator/formats.js";
 import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK, COMMANDCODE_BLOCK, RESPONSES_ITEM } from "../translator/schema/index.js";
 import { HEADROOM_TOOL_OUTPUT_MAX_DEPTH } from "./constants.js";
+import { claudeToOpenAIRequest } from "../translator/request/claude-to-openai.js";
+import { openaiToClaudeRequest } from "../translator/request/openai-to-claude.js";
+import { FORMATS } from "../translator/formats.js";
+import { ROLE, OPENAI_BLOCK, COMMANDCODE_BLOCK } from "../translator/schema/index.js";
 import {
   openaiResponsesToOpenAIRequest,
   openaiToOpenAIResponsesRequest,
@@ -48,6 +52,7 @@ function captureSizeSnapshot(body) {
     bodyBytes: jsonBytes(body),
     messageBytes: messages ? jsonBytes(messages) : 0,
     toolSchemaBytes: jsonBytes(body?.tools || body?.params?.tools || body?.request?.tools || []),
+    toolSchemaBytes: jsonBytes(body?.tools || body?.params?.tools || []),
     toolHistoryBytes: jsonBytes(toolHistory),
   };
 }
