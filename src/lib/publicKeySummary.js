@@ -136,6 +136,7 @@ export async function buildPublicKeySummary(id, options = {}) {
         id: record.id,
         name: record.name || null,
         status,
+        pinRequired: record.publicPinSet === true,
         usable,
         createdAt: record.createdAt || null,
         expiresAt: record.expiresAt ?? null,
@@ -160,4 +161,13 @@ export async function buildPublicKeySummary(id, options = {}) {
       },
     },
   };
+}
+
+export async function getPublicKeyGate(id) {
+  if (typeof id !== "string" || !id) return { shared: false };
+  const { getAdapter } = await import("@/lib/db/driver.js");
+  const db = await getAdapter();
+  const row = db.get("SELECT publicShare, publicPinHash FROM apiKeys WHERE id = ?", [id]);
+  if (!row || !(row.publicShare === true || row.publicShare === 1)) return { shared: false };
+  return { shared: true, pinRequired: typeof row.publicPinHash === "string" && row.publicPinHash.length > 0 };
 }

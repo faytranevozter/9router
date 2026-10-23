@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -96,6 +96,8 @@ export const TABLES = {
       // Opt-in public status page (/k/{id}). Additive column picked up by
       // syncSchemaFromTables() on boot; existing rows read as 0 (sharing off).
       publicShare: "INTEGER DEFAULT 0",
+      // Optional bcrypt hash for the public status-page PIN; NULL means open.
+      publicPinHash: "TEXT",
     },
     indexes: ["CREATE INDEX IF NOT EXISTS idx_ak_key ON apiKeys(key)"],
   },

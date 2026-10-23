@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { deleteApiKey, getApiKeyById, updateApiKey } from "@/lib/localDb";
 import { validateKeyAccessInput } from "@/shared/utils/keyAccess.js";
 import { validateKeyExpiration } from "@/shared/utils/keyExpiration.js";
+import { validatePublicPin } from "@/shared/utils/publicKeyPin.js";
+import { hashPublicPin } from "@/lib/auth/publicPin.js";
 
 // GET /api/keys/[id] - Get single key
 export async function GET(request, { params }) {
@@ -23,7 +25,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, isActive, access, tokenLimit, usedTokens, expiresAt, publicShare } = body;
+    const { name, isActive, access, tokenLimit, usedTokens, expiresAt, publicShare, publicPin } = body;
 
     const existing = await getApiKeyById(id);
     if (!existing) {
@@ -51,6 +53,11 @@ export async function PUT(request, { params }) {
         return NextResponse.json({ error: "publicShare must be a boolean" }, { status: 400 });
       }
       updateData.publicShare = publicShare;
+    }
+    if (publicPin !== undefined) {
+      const checked = validatePublicPin(publicPin);
+      if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
+      updateData.publicPinHash = checked.value === null ? null : await hashPublicPin(checked.value);
     }
 
     const updated = await updateApiKey(id, updateData);

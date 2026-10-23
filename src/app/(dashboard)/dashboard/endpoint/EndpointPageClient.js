@@ -844,6 +844,21 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
     }
   };
 
+  const handleSetPublicPin = async (id, publicPin) => {
+    const res = await fetch(`/api/keys/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ publicPin }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.key) return { error: data.error || "Failed to update PIN" };
+    setKeys((prev) => prev.map((key) => key.id === id ? { ...key, publicPinSet: data.key.publicPinSet } : key));
+    setEditingKey((current) => current?.id === id ? { ...current, publicPinSet: data.key.publicPinSet } : current);
+    return { ok: true };
+  };
+
+  const handleRemovePublicPin = (id) => setConfirmState({
+    title: "Remove status-page PIN?",
+    message: "Anyone with this link will be able to view the status page again.",
+    onConfirm: async () => { await handleSetPublicPin(id, null); setConfirmState(null); },
+  });
+
   const maskKey = (fullKey) => {
     if (!fullKey || fullKey.length <= 10) return fullKey || "";
     return fullKey.slice(0, 6) + "••••••" + fullKey.slice(-4);
@@ -1306,6 +1321,11 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
                   <button onClick={() => handleTogglePublicShare(key.id, key.publicShare !== true)} title={key.publicShare ? "Public status page is on — click to revoke" : "Share public status page"} className={`inline-flex size-8 items-center justify-center rounded-lg hover:bg-surface-2 ${key.publicShare ? "text-primary" : "text-text-muted hover:text-primary"}`}>
                     <span className="material-symbols-outlined text-[18px]">{key.publicShare ? "link" : "link_off"}</span>
                   </button>
+                  {key.publicShare === true && (
+                    <button onClick={() => { const root = typeof window !== "undefined" ? window.location.origin : ""; copy(`${root}/k/${key.id}`, `public-link-${key.id}`); }} title="Copy public status link" aria-label="Copy public status link" className="inline-flex size-8 items-center justify-center rounded-lg text-text-muted hover:bg-surface-2 hover:text-primary">
+                      <span className="material-symbols-outlined text-[18px]">{copied === `public-link-${key.id}` ? "check" : "content_copy"}</span>
+                    </button>
+                  )}
                   <button onClick={() => {
                     if (key.isActive !== false) setConfirmState({title: "Pause API Key", message: `Pause API key "${key.name}"? It will stop working immediately.`, onConfirm: () => { setConfirmState(null); handleToggleKey(key.id, false); }});
                     else handleToggleKey(key.id, true);
@@ -1436,6 +1456,8 @@ export default function APIPageClient({ machineId, view = "endpoint" }) {
                 handleTogglePublicShare(editingKey.id, publicShare);
                 setEditingKey({ ...editingKey, publicShare });
               }}
+              onSetPin={(pin) => handleSetPublicPin(editingKey.id, pin)}
+              onRemovePin={() => handleRemovePublicPin(editingKey.id)}
             />
           </div>
           <div className="flex gap-2">

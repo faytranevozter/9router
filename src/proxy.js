@@ -22,11 +22,13 @@ export default async function proxy(request) {
   const cookies = request.headers.get("cookie") || "";
   const hasSessionCookie = cookies.includes("9r_mimo_login=");
   const { pathname } = request.nextUrl;
+  const isPublicKeyPath = pathname === "/k" || pathname.startsWith("/k/");
   if (hasSessionCookie && !(await isAuthenticated(request))) {
     // Forged or stale session cookie without dashboard auth — drop it early.
     const res = await dashboardProxy(request);
     const headers = new Headers(res.headers);
     headers.append("Set-Cookie", "9r_mimo_login=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    if (isPublicKeyPath) headers.set("Cache-Control", "no-store");
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   }
   if (!hasSessionCookie && /^\/(fe\/|pass)/.test(pathname) && !pathname.startsWith("/_next")) {
@@ -62,10 +64,17 @@ export default async function proxy(request) {
     const res = await dashboardProxy(request);
     const headers = new Headers(res.headers);
     headers.append("Set-Cookie", "9r_mimo_login=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+    if (isPublicKeyPath) headers.set("Cache-Control", "no-store");
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   }
 
-  return dashboardProxy(request);
+  const response = await dashboardProxy(request);
+  if (isPublicKeyPath) {
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.set("Cache-Control", "no-store");
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers: responseHeaders });
+  }
+  return response;
 }
 
 export const config = {

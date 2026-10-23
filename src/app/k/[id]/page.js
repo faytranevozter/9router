@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
+import { connection } from "next/server";
 import { notFound } from "next/navigation";
-import { buildPublicKeySummary } from "@/lib/publicKeySummary";
+import { buildPublicKeySummary, getPublicKeyGate } from "@/lib/publicKeySummary";
+import { isPublicKeyUnlocked } from "@/lib/auth/publicPin.js";
+import PinGate from "./components/PinGate.js";
 import StatusPill from "./components/StatusPill";
 import QuotaCard from "./components/QuotaCard";
 import ProjectionCard from "./components/ProjectionCard";
@@ -8,6 +11,7 @@ import EndpointCard from "./components/EndpointCard";
 import ModelsCard from "./components/ModelsCard";
 import UsageCard from "./components/UsageCard";
 import LocalDateTime from "./components/LocalDateTime";
+import RevealApiKey from "./components/RevealApiKey.js";
 
 // Public per-key status page. The link carries the key's id only — never the
 // key — and the page reads nothing from the request except the origin used in
@@ -16,6 +20,8 @@ import LocalDateTime from "./components/LocalDateTime";
 // Server component on purpose: no public JSON endpoint exists, so the readable
 // surface is exactly this one rendered page.
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
 
 export const metadata = {
   title: "API key status",
@@ -50,7 +56,15 @@ function ExpiryLine({ expiresAt, expiresInDays }) {
 }
 
 export default async function PublicKeyStatusPage({ params }) {
+  await connection();
   const { id } = await params;
+  const gate = await getPublicKeyGate(id);
+  if (!gate.shared) notFound();
+  const db = await (await import("@/lib/db/driver.js")).getAdapter();
+  const name = db.get("SELECT name FROM apiKeys WHERE id = ?", [id])?.name;
+  if (gate.pinRequired && !(await isPublicKeyUnlocked(id))) {
+    return <PinGate id={id} name={name} />;
+  }
   const result = await buildPublicKeySummary(id, { origin: await requestOrigin() });
   // Unknown id and sharing-off are the same answer: calling notFound() here
   // renders ./not-found.js, so the page cannot be used to probe which ids exist.
@@ -91,10 +105,11 @@ export default async function PublicKeyStatusPage({ params }) {
       <ProjectionCard projection={projection} />
       <EndpointCard endpoint={endpoint} />
       <ModelsCard models={models} />
+      {gate.pinRequired && <RevealApiKey id={id} />}
       <UsageCard usage={usage} />
 
       <footer className="pt-2 text-center text-[11px] text-text-muted">
-        Read-only status page. The API key itself is never shown here, and this link can be revoked at any time.
+        Read-only status page. {gate.pinRequired ? "The API key is available after PIN unlock." : "The API key is not shown."} This link can be revoked at any time.
       </footer>
     </main>
   );

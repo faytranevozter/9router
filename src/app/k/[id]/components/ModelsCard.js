@@ -1,8 +1,15 @@
+"use client";
+
 import PropTypes from "prop-types";
+import { useState } from "react";
 import { fmtTokens } from "@/shared/utils/formatTokens";
+
+const INITIAL_MODEL_COUNT = 12;
 
 // The models THIS key may call — the same allow-list filter /v1/models applies.
 export default function ModelsCard({ models }) {
+  const [showAll, setShowAll] = useState(false);
+  const visibleModels = showAll ? models : models.slice(0, INITIAL_MODEL_COUNT);
   return (
     <section className="rounded-[14px] border border-border bg-surface shadow-[var(--shadow-soft)]">
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
@@ -29,7 +36,7 @@ export default function ModelsCard({ models }) {
               </tr>
             </thead>
             <tbody>
-              {models.map((model) => (
+              {visibleModels.map((model) => (
                 <tr key={model.id} className="border-b border-border/60 last:border-b-0">
                   <td className="whitespace-nowrap px-4 py-1.5 font-mono text-[11px] text-text-main">{model.id}</td>
                   <td className="whitespace-nowrap px-3 py-1.5 text-text-muted">{model.owned_by || "—"}</td>
@@ -43,6 +50,13 @@ export default function ModelsCard({ models }) {
               ))}
             </tbody>
           </table>
+          {models.length > INITIAL_MODEL_COUNT && (
+            <div className="border-t border-border px-4 py-2.5 text-center">
+              <button type="button" onClick={() => setShowAll((value) => !value)} className="rounded-md px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                {showAll ? "Show fewer" : `Show all ${models.length} models`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>

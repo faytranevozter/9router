@@ -25,6 +25,7 @@ function rowToKey(row) {
     expiresAt: row.expiresAt ?? null,
     access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
     publicShare: row.publicShare === 1 || row.publicShare === true,
+    publicPinSet: typeof row.publicPinHash === "string" && row.publicPinHash.length > 0,
   };
 }
 
@@ -38,6 +39,14 @@ export async function getApiKeyById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]);
   return rowToKey(row);
+}
+
+// Public status page secret reveal: intentionally isolated from rowToKey and
+// ordinary key-list/API responses. Call only after the PIN gate has unlocked.
+export async function getApiKeySecretForPublicStatus(id) {
+  const db = await getAdapter();
+  const row = db.get("SELECT key FROM apiKeys WHERE id = ? AND publicShare = 1", [id]);
+  return typeof row?.key === "string" ? row.key : null;
 }
 
 // Used by the /v1 handlers to read the presented key's access settings.
@@ -107,7 +116,7 @@ export async function updateApiKey(id, data) {
     const usedTokens = merged.usedTokens != null ? Math.max(0, Number(merged.usedTokens) || 0) : 0;
     const cols = keyAccessToColumns(merged.access || KEY_ACCESS_UNRESTRICTED);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ?, expiresAt = ?, publicShare = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, tokenLimit = ?, usedTokens = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ?, expiresAt = ?, publicShare = ?, publicPinHash = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -120,6 +129,7 @@ export async function updateApiKey(id, data) {
         cols.accessAllow,
         merged.expiresAt,
         merged.publicShare === true ? 1 : 0,
+        data.publicPinHash === undefined ? row.publicPinHash ?? null : data.publicPinHash,
         id,
       ]
     );

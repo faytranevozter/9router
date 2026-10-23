@@ -226,6 +226,13 @@ describe("the public payload", () => {
     expect(summary.usage.period).toBe("7d");
   });
 
+  it("builds model lists for the full allowed set; the page component can progressively reveal the rest", async () => {
+    const key = await makeKey("many models", { publicShare: true });
+    const result = await buildPublicKeySummary(key.id);
+    expect(result.summary.models.length).toBeGreaterThan(12);
+    expect(result.summary.models[0]).toHaveProperty("id");
+  });
+
   it("never contains the key, its masked form, the machine id, the allow list or cost", async () => {
     // The allow list holds one entry that resolves to nothing, so it can never
     // reappear legitimately through the model list — if it shows up at all, the
