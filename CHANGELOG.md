@@ -65,6 +65,10 @@
 - **Search**: reset regex state between model matches in search filters (#5853a88)
 - **Pi Settings**: declare `existingProvider` before use in POST handler to prevent ReferenceError 500 (#342ecb0)
 - **Tests**: triage master test suite (GLM-5.2 effort, gpt-6.1-sol codex capabilities, image SSRF mocks, refresh known-fails) (#b6a9ca4)
+# Unreleased
+
+## Fixes
+- **OpenCode Free**: fully support reasoning on `oc/mimo-v2.6-flash-free` — the lane takes the plain OpenAI `reasoning_effort` enum, so `none` now disables thinking instead of being clamped to `low`, `minimal`/`max` are selectable instead of collapsing to `low`/`high`, and adaptive (`auto`) effort is dropped rather than sent (upstream answers `400 Invalid option`); its MiMo route streams thinking as `reasoning`/`reasoning_details`, which the OpenAI passthrough now also exposes as `reasoning_content`, and the vendor-alias shapes are read by the SSE→JSON aggregation and the Antigravity/Claude/Responses translators alike
 
 # v0.5.104 (2026-10-15)
 
