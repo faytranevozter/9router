@@ -2,60 +2,23 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { PROVIDERS } from "open-sse/config/providers.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
+import { normalizeHeaderOverrides } from "open-sse/utils/headerOverrides.js";
 
 export const dynamic = "force-dynamic";
-
-// Validation at the trust boundary — the UI also validates, but this is the gate.
-const MAX_HEADERS = 20;
-const MAX_HEADER_VALUE_LENGTH = 8192;
-// RFC 7230 token subset: letters, digits, hyphen (no spaces, no unicode)
-const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
-// Request-structure / auth headers a user override must never touch
-const BLOCKED_HEADERS = new Set([
-  "host",
-  "content-length",
-  "content-type",
-  "connection",
-  "transfer-encoding",
-  "authorization",
-  "cookie",
-]);
 
 /**
  * Validate + normalize an override payload. Returns { override } or { error }.
  * An override with no headers is normalized to null (= delete).
+ * Validation lives in open-sse/utils/headerOverrides.js so the dashboard
+ * editor enforces the same rules before the request reaches this gate.
  */
-function normalizeOverride({ headers }) {
-  const out = {};
-
-  if (headers !== undefined && headers !== null) {
-    if (typeof headers !== "object" || Array.isArray(headers)) {
-      return { error: "headers must be an object" };
-    }
-    const entries = Object.entries(headers).filter(([, v]) => v !== "" && v != null);
-    if (entries.length > MAX_HEADERS) {
-      return { error: `Too many headers (max ${MAX_HEADERS})` };
-    }
-    const clean = {};
-    for (const [name, value] of entries) {
-      if (!HEADER_NAME_RE.test(name)) {
-        return { error: `Invalid header name: ${name}` };
-      }
-      if (typeof value !== "string" || /[\r\n]/.test(value)) {
-        return { error: `Invalid value for header ${name}` };
-      }
-      if (value.length > MAX_HEADER_VALUE_LENGTH) {
-        return { error: `Header ${name} value too long (max ${MAX_HEADER_VALUE_LENGTH})` };
-      }
-      if (BLOCKED_HEADERS.has(name.toLowerCase())) {
-        return { error: `Header ${name} cannot be overridden` };
-      }
-      clean[name] = value;
-    }
-    if (Object.keys(clean).length) out.headers = clean;
+function normalizeOverride(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "Invalid request body" };
   }
-
-  return { override: Object.keys(out).length ? out : null };
+  const { headers: clean, error } = normalizeHeaderOverrides(body.headers);
+  if (error) return { error };
+  return { override: Object.keys(clean).length ? { headers: clean } : null };
 }
 
 async function readOverrides() {
@@ -102,7 +65,12 @@ export async function PUT(request, { params }) {
     if (override) next[canonical] = override;
     else delete next[canonical];
     await updateSettings({ providerOverrides: next });
-    return NextResponse.json({ headers: override?.headers || {} });
+    // Return the normalized state (and registry defaults) so the editor can
+    // adopt exactly what was saved instead of its own draft.
+    return NextResponse.json({
+      headers: override?.headers || {},
+      builtinHeaders: PROVIDERS[canonical]?.headers || {},
+    });
   } catch (error) {
     console.log("Error saving provider overrides:", error);
     return NextResponse.json({ error: "Failed to save overrides" }, { status: 500 });
