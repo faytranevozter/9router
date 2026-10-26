@@ -4,7 +4,7 @@ import { HEADROOM_TOOL_OUTPUT_MAX_DEPTH } from "./constants.js";
 import { claudeToOpenAIRequest } from "../translator/request/claude-to-openai.js";
 import { openaiToClaudeRequest } from "../translator/request/openai-to-claude.js";
 import { FORMATS } from "../translator/formats.js";
-import { ROLE, OPENAI_BLOCK, COMMANDCODE_BLOCK, RESPONSES_ITEM } from "../translator/schema/index.js";
+import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK, COMMANDCODE_BLOCK, RESPONSES_ITEM } from "../translator/schema/index.js";
 import { HEADROOM_TOOL_OUTPUT_MAX_DEPTH } from "./constants.js";
 import {
   openaiResponsesToOpenAIRequest,
@@ -429,19 +429,6 @@ export async function compressWithHeadroom(body, { enabled, url, model, format, 
     if (toolOutputs) {
       if (!toolOutputs.messages.length) {
         setDiagnostic(diagnostics, "no eligible plain-text tool output");
-        return null;
-      }
-      const data = await callCompress(url, toolOutputs.messages, model, timeoutMs, compressUserMessages, diagnostics || {});
-      if (!data || !applyToolOutputText(toolOutputs, data.messages, diagnostics)) return null;
-      if (diagnostics) diagnostics.after = captureSizeSnapshot(body);
-      return data;
-    }
-
-    // Claude shape: translate → OpenAI → compress → translate back.
-    if (format === "claude") {
-      const oai = claudeToOpenAIRequest(model, body, false);
-      if (!Array.isArray(oai?.messages)) {
-        setDiagnostic(diagnostics, "Claude request did not translate to messages[]");
         return null;
       }
       const data = await callCompress(url, toolOutputs.messages, model, timeoutMs, compressUserMessages, diagnostics || {});
