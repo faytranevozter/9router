@@ -161,7 +161,6 @@ export default {
     { id: "laya:421m-typed-decisions-bf16",       name: "Laya 421M Decisions (BF16)",            kind: "embedding", dimensions: 1024 },
   ],
   serviceKinds: ["llm", "systemone", "tts", "embedding"],
-  ],
   systemoneConfig: {
     baseUrl: "http://localhost:11434/v1/systemone",
     // Saved host (providerSpecificData.baseUrl) is joined with this path.
