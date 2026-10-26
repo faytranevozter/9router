@@ -11,6 +11,9 @@
  *   definition in place whenever its arguments can carry them; only a genuinely
  *   different schema travels under an alias, and the response side restores
  *   that caller's original name.
+ *   FreeTierError. Caller tools are sent untouched, except one that already
+ *   uses an exact fingerprint name with a different definition: it travels
+ *   under an alias and the response side restores the caller's original name.
  * - System prompt: the CLI's `<env>` marker must be present. A request missing
  *   either half (marker or tools) answers 429 FreeUsageLimitError regardless of
  *   headers, UA or session shape; both halves together pass.
